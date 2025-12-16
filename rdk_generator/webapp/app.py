@@ -1,27 +1,50 @@
 from __future__ import annotations
 
+import os
 import uuid
 from pathlib import Path
 
-from flask import Flask, Response, redirect, render_template, request, send_file, url_for
+from flask import Flask, Response, redirect, render_template, request, send_file, session, url_for
 
 from ..export import write_frames_zip, write_mp4
 from ..params import RDKParams, RenderParams
 
 
-def create_app() -> Flask:
+def create_app(*, instance_path: str | None = None) -> Flask:
     app = Flask(
         __name__,
         instance_relative_config=True,
         template_folder=str(Path(__file__).with_name("templates")),
+        instance_path=instance_path,
     )
+
+    # Needed for session-based "remember last params" behavior.
+    # For real deployments set RDK_SECRET_KEY to a strong random value.
+    app.config["SECRET_KEY"] = os.environ.get("RDK_SECRET_KEY", "dev-secret-key-change-me")
 
     output_dir = Path(app.instance_path) / "outputs"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     @app.get("/")
     def index() -> str:
-        return render_template("index.html")
+        last_params = session.get("last_params") or {}
+        job_id = session.get("last_job_id")
+        mp4_url = None
+        zip_url = None
+        if job_id:
+            mp4_path = output_dir / f"{job_id}.mp4"
+            zip_path = output_dir / f"{job_id}.zip"
+            if mp4_path.exists() and zip_path.exists():
+                mp4_url = url_for("download_mp4", job_id=job_id)
+                zip_url = url_for("download_frames", job_id=job_id)
+
+        return render_template(
+            "index.html",
+            params=last_params,
+            job_id=job_id,
+            mp4_url=mp4_url,
+            zip_url=zip_url,
+        )
 
     def _parse_int(name: str, default: int) -> int:
         try:
@@ -64,6 +87,26 @@ def create_app() -> Flask:
             seed=_parse_int("seed", 0) if request.form.get("seed", "") != "" else None,
         )
 
+        # Remember last-used params so the UI stays sticky.
+        session["last_params"] = {
+            "n_dots": rdk.n_dots,
+            "dot_size_px": rdk.dot_size_px,
+            "speed_px_per_s": rdk.speed_px_per_s,
+            "dot_life_frames": rdk.dot_life_frames,
+            "direction_deg": rdk.direction_deg,
+            "coherence": rdk.coherence,
+            "field_diam_px": rdk.field_diam_px,
+            "gauss_sigma_px": (rdk.gauss_sigma_px or 0),
+            "width_px": render.width_px,
+            "height_px": render.height_px,
+            "fps": render.fps,
+            "duration_s": render.duration_s,
+            "background_lum": render.background_lum,
+            "dot_contrast": render.dot_contrast,
+            "seed": ("" if render.seed is None else render.seed),
+            "reassign_life": ("on" if rdk.reassign_life else ""),
+        }
+
         job_id = uuid.uuid4().hex
         mp4_path = output_dir / f"{job_id}.mp4"
         zip_path = output_dir / f"{job_id}.zip"
@@ -71,13 +114,9 @@ def create_app() -> Flask:
         write_mp4(mp4_path, rdk=rdk, render=render)
         write_frames_zip(zip_path, rdk=rdk, render=render)
 
-        return redirect(url_for("result", job_id=job_id))
+        session["last_job_id"] = job_id
 
-    @app.get("/result/<job_id>")
-    def result(job_id: str) -> str:
-        mp4_url = url_for("download_mp4", job_id=job_id)
-        zip_url = url_for("download_frames", job_id=job_id)
-        return render_template("result.html", job_id=job_id, mp4_url=mp4_url, zip_url=zip_url)
+        return redirect(url_for("index"))
 
     @app.get("/download/<job_id>.mp4")
     def download_mp4(job_id: str):
