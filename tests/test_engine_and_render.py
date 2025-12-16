@@ -1,6 +1,6 @@
 import numpy as np
 
-from rdk_generator.core import FrameRenderer, RDKEngine
+from rdk_generator.core import FrameRenderer, NonOverlappingRDKEngine, RDKEngine
 
 
 def test_engine_coherence_approx():
@@ -70,3 +70,37 @@ def test_frame_mean_close_to_background_reasonable():
     frame = r.render(e.xys, e.dot_lum, e.compute_opacity())
     mean = frame.mean() / 255.0
     assert abs(mean - bg) < 0.15
+
+
+def _min_pairwise_distance(xys: np.ndarray) -> float:
+    diff = xys[:, None, :] - xys[None, :, :]
+    dist = np.sqrt(np.sum(diff * diff, axis=2))
+    np.fill_diagonal(dist, np.inf)
+    return float(np.min(dist))
+
+
+def test_non_overlapping_engine_respects_min_sep_initial_and_steps():
+    e = NonOverlappingRDKEngine(
+        min_sep_px=4.0,
+        n_dots=150,
+        dot_life_frames=6,
+        coherence=0.5,
+        direction_deg=0,
+        speed_px_per_s=120,
+        field_diam_px=200,
+        gauss_sigma_px=60,
+        reassign_life=True,
+        fps=60,
+        seed=123,
+        background_lum=0.5,
+        dot_contrast=1.0,
+        dot_low_lum=None,
+        dot_high_lum=None,
+    )
+
+    # Allow a tiny numerical tolerance.
+    assert _min_pairwise_distance(e.xys) >= 3.95
+
+    for _ in range(5):
+        e.step()
+        assert _min_pairwise_distance(e.xys) >= 3.95

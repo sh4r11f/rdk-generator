@@ -21,6 +21,8 @@ def create_app(*, instance_path: str | None = None) -> Flask:
     # Needed for session-based "remember last params" behavior.
     # For real deployments set RDK_SECRET_KEY to a strong random value.
     app.config["SECRET_KEY"] = os.environ.get("RDK_SECRET_KEY", "dev-secret-key-change-me")
+    # Bump this if session semantics change.
+    app.config["SESSION_SCHEMA_VERSION"] = "v1"
 
     output_dir = Path(app.instance_path) / "outputs"
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -28,10 +30,29 @@ def create_app(*, instance_path: str | None = None) -> Flask:
     @app.get("/")
     def index() -> str:
         last_params = session.get("last_params") or {}
+
+        # Ensure "first view" never auto-shows a preview.
+        # If the schema version changed (or session is new), we keep params but clear preview.
+        schema = app.config.get("SESSION_SCHEMA_VERSION")
+        if session.get("_schema") != schema:
+            session["_schema"] = schema
+            session.pop("last_job_id", None)
+            session["has_preview"] = False
+
+        # Default UI preferences (while still allowing sticky overrides)
+        if "prevent_overlap" not in last_params:
+            last_params["prevent_overlap"] = "on"
+        if "min_sep_px" not in last_params or last_params.get("min_sep_px") in (None, ""):
+            try:
+                dot_size = float(last_params.get("dot_size_px", 3))
+            except Exception:
+                dot_size = 3.0
+            last_params["min_sep_px"] = round(dot_size * 1.1, 2)
+
         job_id = session.get("last_job_id")
         mp4_url = None
         zip_url = None
-        if job_id:
+        if job_id and bool(session.get("has_preview")):
             mp4_path = output_dir / f"{job_id}.mp4"
             zip_path = output_dir / f"{job_id}.zip"
             if mp4_path.exists() and zip_path.exists():
@@ -60,6 +81,23 @@ def create_app(*, instance_path: str | None = None) -> Flask:
 
     @app.post("/generate")
     def generate() -> Response:
+        # If a user posts to /generate before ever loading /, ensure we don't treat
+        # the redirect target as a "first view" that must hide the preview.
+        schema = app.config.get("SESSION_SCHEMA_VERSION")
+        if session.get("_schema") != schema:
+            session["_schema"] = schema
+
+        prevent_overlap = bool(request.form.get("prevent_overlap", "") == "on")
+        min_sep_px = _parse_float("min_sep_px", 0.0)
+        if not prevent_overlap:
+            min_sep_val = None
+        else:
+            if min_sep_px <= 0:
+                # Sensible default when enabled
+                min_sep_val = float(_parse_int("dot_size_px", 3)) * 1.1
+            else:
+                min_sep_val = float(min_sep_px)
+
         rdk = RDKParams(
             n_dots=_parse_int("n_dots", 300),
             dot_size_px=_parse_int("dot_size_px", 3),
@@ -75,6 +113,7 @@ def create_app(*, instance_path: str | None = None) -> Flask:
                 else None
             ),
             reassign_life=bool(request.form.get("reassign_life", "on") == "on"),
+            min_sep_px=min_sep_val,
         )
 
         render = RenderParams(
@@ -105,6 +144,8 @@ def create_app(*, instance_path: str | None = None) -> Flask:
             "dot_contrast": render.dot_contrast,
             "seed": ("" if render.seed is None else render.seed),
             "reassign_life": ("on" if rdk.reassign_life else ""),
+            "prevent_overlap": ("on" if rdk.min_sep_px is not None else ""),
+            "min_sep_px": ("" if rdk.min_sep_px is None else rdk.min_sep_px),
         }
 
         job_id = uuid.uuid4().hex
@@ -115,6 +156,7 @@ def create_app(*, instance_path: str | None = None) -> Flask:
         write_frames_zip(zip_path, rdk=rdk, render=render)
 
         session["last_job_id"] = job_id
+        session["has_preview"] = True
 
         return redirect(url_for("index"))
 

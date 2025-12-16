@@ -10,7 +10,7 @@ import imageio.v2 as imageio
 import numpy as np
 from PIL import Image
 
-from .core import FrameRenderer, RDKEngine
+from .core import FrameRenderer, NonOverlappingRDKEngine, RDKEngine
 from .params import RDKParams, RenderParams
 
 
@@ -19,7 +19,12 @@ def render_frames(rdk: RDKParams, render: RenderParams) -> list[np.ndarray]:
     n_frames = int(round(render.duration_s * render.fps))
     n_frames = max(1, n_frames)
 
-    engine = RDKEngine(
+    engine_cls = NonOverlappingRDKEngine if rdk.min_sep_px is not None else RDKEngine
+    engine_kwargs = {}
+    if rdk.min_sep_px is not None:
+        engine_kwargs["min_sep_px"] = float(rdk.min_sep_px)
+
+    engine = engine_cls(
         n_dots=rdk.n_dots,
         dot_life_frames=rdk.dot_life_frames,
         coherence=rdk.coherence,
@@ -34,6 +39,7 @@ def render_frames(rdk: RDKParams, render: RenderParams) -> list[np.ndarray]:
         dot_contrast=render.dot_contrast,
         dot_low_lum=render.dot_low_lum,
         dot_high_lum=render.dot_high_lum,
+        **engine_kwargs,
     )
 
     renderer = FrameRenderer(

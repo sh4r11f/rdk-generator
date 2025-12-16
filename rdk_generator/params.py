@@ -27,6 +27,13 @@ class RDKParams:
     gauss_sigma_px: float | None = None
     reassign_life: bool = True
 
+    # Optional non-overlap mode (for movie rendering):
+    # When enabled, dot centers are kept at least `min_sep_px` apart.
+    # If None, dots may overlap.
+    #
+    # Recommended default if you enable it: ~1.1 * dot_size_px
+    min_sep_px: float | None = None
+
 
 @dataclass(frozen=True, slots=True)
 class RenderParams:

@@ -116,6 +116,156 @@ class RDKEngine:
             self.xys[outside] = rand_points_in_circle(int(np.sum(outside)), self.radius, self.rng)
 
 
+class NonOverlappingRDKEngine(RDKEngine):
+    """RDK engine that keeps dot centers at least `min_sep_px` apart.
+
+    This is a separate algorithm/code path intended for offline rendering/export.
+
+    Implementation notes:
+      - Initial placement and respawns use rejection sampling.
+      - After each motion step, any dots that violate the constraint are replanted.
+      - For very high densities, the sampler adaptively relaxes `min_sep_px`.
+    """
+
+    def __init__(
+        self,
+        *,
+        min_sep_px: float,
+        max_reject_attempts: int = 20000,
+        relax_factor: float = 0.95,
+        **kwargs,
+    ) -> None:
+        self.min_sep_px = float(min_sep_px)
+        if self.min_sep_px <= 0:
+            raise ValueError("min_sep_px must be > 0")
+        self.max_reject_attempts = int(max(1, max_reject_attempts))
+        self.relax_factor = float(relax_factor)
+        if not (0.0 < self.relax_factor < 1.0):
+            raise ValueError("relax_factor must be in (0,1)")
+
+        super().__init__(**kwargs)
+
+        # Replace initial positions with non-overlapping placement.
+        self.xys = self._poisson_rejection(self.n, self.radius, self.min_sep_px)
+
+    def _poisson_rejection(self, n: int, radius: float, min_sep_px: float) -> np.ndarray:
+        min_sep_px = float(min_sep_px)
+        min_sep_sq = min_sep_px * min_sep_px
+        pts: list[tuple[float, float]] = []
+        attempts = 0
+
+        while len(pts) < n:
+            if attempts > self.max_reject_attempts:
+                # Too dense; relax slightly and restart.
+                min_sep_px *= self.relax_factor
+                min_sep_sq = min_sep_px * min_sep_px
+                pts = []
+                attempts = 0
+
+            cand = rand_points_in_circle(1, radius, self.rng)[0]
+            x = float(cand[0])
+            y = float(cand[1])
+            ok = True
+            for (px, py) in pts:
+                dx = x - px
+                dy = y - py
+                if dx * dx + dy * dy < min_sep_sq:
+                    ok = False
+                    break
+            if ok:
+                pts.append((x, y))
+            attempts += 1
+
+        return np.asarray(pts, dtype=np.float32)
+
+    def _respawn_with_distance(self, mask: np.ndarray) -> None:
+        if not np.any(mask):
+            return
+
+        min_sep_sq = float(self.min_sep_px) ** 2
+        radius = float(self.radius)
+        existing = self.xys[~mask]
+        n_new = int(np.sum(mask))
+        new_pts: list[tuple[float, float]] = []
+        attempts = 0
+
+        while len(new_pts) < n_new:
+            if attempts > self.max_reject_attempts:
+                # Too dense; relax slightly and restart this batch.
+                self.min_sep_px *= self.relax_factor
+                min_sep_sq = float(self.min_sep_px) ** 2
+                new_pts = []
+                attempts = 0
+
+            cand = rand_points_in_circle(1, radius, self.rng)[0]
+            x = float(cand[0])
+            y = float(cand[1])
+
+            ok = True
+            if existing.size:
+                dx = x - existing[:, 0]
+                dy = y - existing[:, 1]
+                if np.any(dx * dx + dy * dy < min_sep_sq):
+                    ok = False
+
+            if ok and new_pts:
+                for (px, py) in new_pts:
+                    dx2 = x - px
+                    dy2 = y - py
+                    if dx2 * dx2 + dy2 * dy2 < min_sep_sq:
+                        ok = False
+                        break
+
+            if ok:
+                new_pts.append((x, y))
+
+            attempts += 1
+
+        self.xys[mask] = np.asarray(new_pts, dtype=np.float32)
+
+    def _resolve_violations(self, max_iters: int = 3) -> None:
+        # Iteratively replant any dots that violate the minimum distance.
+        min_sep_sq = float(self.min_sep_px) ** 2
+        for _ in range(int(max_iters)):
+            diff = self.xys[:, None, :] - self.xys[None, :, :]
+            dist_sq = np.sum(diff * diff, axis=2)
+            np.fill_diagonal(dist_sq, np.inf)
+            viol = dist_sq < min_sep_sq
+            if not np.any(viol):
+                return
+            repl_mask = np.any(viol, axis=1)
+            self._respawn_with_distance(repl_mask)
+
+    def step(self) -> None:
+        # Same as base, but all replanting respects minimum distance and
+        # we also resolve collisions after motion.
+        self.life -= 1
+        dead = self.life <= 0
+        if np.any(dead):
+            self.life[dead] = self.dot_life
+            if self.reassign_life:
+                self._assign_membership()
+            self._respawn_with_distance(dead)
+
+        step_scale = self.speed_px_per_s / float(self.fps)
+        steps = np.empty_like(self.xys)
+        steps[self.is_signal] = self.signal_vec[None, :] * step_scale
+
+        n_noise = int(np.count_nonzero(~self.is_signal))
+        if n_noise:
+            thetas = 2.0 * np.pi * self.rng.random(n_noise)
+            rand_vecs = np.column_stack([np.cos(thetas), np.sin(thetas)]).astype(np.float32)
+            steps[~self.is_signal] = rand_vecs * step_scale
+
+        self.xys += steps
+
+        outside = np.sum(self.xys * self.xys, axis=1) > (self.radius * self.radius)
+        if np.any(outside):
+            self._respawn_with_distance(outside)
+
+        self._resolve_violations(max_iters=3)
+
+
 class FrameRenderer:
     """Render RDK frames into grayscale images (uint8)."""
 

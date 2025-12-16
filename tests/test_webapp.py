@@ -9,6 +9,7 @@ def test_index_loads():
     r = client.get("/")
     assert r.status_code == 200
     assert b"RDK Generator" in r.data
+    assert b"No preview yet" in r.data
 
 
 def test_generate_renders_preview_on_index(monkeypatch, tmp_path: Path):
@@ -50,6 +51,8 @@ def test_generate_renders_preview_on_index(monkeypatch, tmp_path: Path):
             "dot_contrast": "1.0",
             "seed": "",
             "reassign_life": "on",
+            "prevent_overlap": "on",
+            "min_sep_px": "4.0",
         },
         follow_redirects=True,
     )

@@ -149,10 +149,18 @@
               <input name="seed" type="number" value="{{ params.get('seed', '') }}" />
             </label>
 
+            <label>Min separation (px)
+              <input name="min_sep_px" type="number" value="{{ params.get('min_sep_px', '') }}" min="0" step="0.1" />
+            </label>
+
             <div class="row">
               <label class="check">
                 <input name="reassign_life" type="checkbox" {% if params.get('reassign_life', 'on') == 'on' %}checked{% endif %} />
                 Reassign signal/noise on respawn
+              </label>
+              <label class="check">
+                <input name="prevent_overlap" type="checkbox" {% if params.get('prevent_overlap', '') == 'on' %}checked{% endif %} />
+                Prevent overlap
               </label>
               <div class="actions">
                 <button type="submit">Generate preview</button>
