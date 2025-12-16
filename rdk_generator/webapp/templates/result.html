@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RDK Result</title>
+    <style>
+      body { font-family: system-ui, -apple-system, sans-serif; margin: 24px; }
+      .links { display: flex; gap: 12px; margin-top: 12px; }
+      a { display: inline-block; padding: 10px 14px; border: 1px solid #ccc; text-decoration: none; color: #111; }
+      video { margin-top: 16px; width: min(720px, 100%); border: 1px solid #ddd; }
+    </style>
+  </head>
+  <body>
+    <h1>Preview</h1>
+    <div class="links">
+      <a href="{{ mp4_url }}">Download .mp4</a>
+      <a href="{{ zip_url }}">Download frames (.zip)</a>
+      <a href="/">Back</a>
+    </div>
+
+    <video controls autoplay loop muted>
+      <source src="{{ mp4_url }}" type="video/mp4" />
+      Your browser does not support the video tag.
+    </video>
+  </body>
+</html>

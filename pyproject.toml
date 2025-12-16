@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rdk-generator"
+version = "0.1.0"
+description = "Random Dot Kinematogram (RDK) generator with Gaussian envelope and a Flask UI"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "rdk-generator contributors" }]
+license = { file = "LICENSE" }
+dependencies = [
+  "numpy>=1.26",
+  "pillow>=10",
+  "imageio>=2.34",
+  "imageio-ffmpeg>=0.5",
+  "flask>=3.0",
+]
+
+[project.optional-dependencies]
+psychopy = ["psychopy"]
+dev = ["pytest>=8", "pytest-cov>=5"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["rdk_generator*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RDK Generator</title>
+    <style>
+      body { font-family: system-ui, -apple-system, sans-serif; margin: 24px; }
+      form { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; max-width: 820px; }
+      label { display: grid; gap: 6px; font-size: 14px; }
+      input { padding: 8px; font-size: 14px; }
+      .row { grid-column: 1 / -1; display: flex; gap: 12px; align-items: center; }
+      button { padding: 10px 14px; font-size: 14px; }
+      .note { max-width: 820px; color: #444; font-size: 13px; margin-top: 10px; }
+    </style>
+  </head>
+  <body>
+    <h1>RDK Generator</h1>
+
+    <form method="post" action="/generate">
+      <label>Dots (n_dots)
+        <input name="n_dots" type="number" value="300" min="1" />
+      </label>
+      <label>Dot size (px)
+        <input name="dot_size_px" type="number" value="3" min="1" />
+      </label>
+
+      <label>Speed (px/s)
+        <input name="speed_px_per_s" type="number" value="120" step="1" />
+      </label>
+      <label>Dot life (frames)
+        <input name="dot_life_frames" type="number" value="12" min="1" />
+      </label>
+
+      <label>Direction (deg)
+        <input name="direction_deg" type="number" value="0" step="1" />
+      </label>
+      <label>Coherence (0..1)
+        <input name="coherence" type="number" value="0.5" min="0" max="1" step="0.01" />
+      </label>
+
+      <label>Field diameter (px)
+        <input name="field_diam_px" type="number" value="300" min="1" />
+      </label>
+      <label>Gaussian sigma (px, optional)
+        <input name="gauss_sigma_px" type="number" value="0" min="0" step="1" />
+      </label>
+
+      <label>Width (px)
+        <input name="width_px" type="number" value="512" min="16" step="1" />
+      </label>
+      <label>Height (px)
+        <input name="height_px" type="number" value="512" min="16" step="1" />
+      </label>
+
+      <label>FPS
+        <input name="fps" type="number" value="60" min="1" />
+      </label>
+      <label>Duration (s)
+        <input name="duration_s" type="number" value="1.0" min="0.1" step="0.1" />
+      </label>
+
+      <label>Background luminance (0..1)
+        <input name="background_lum" type="number" value="0.5" min="0" max="1" step="0.01" />
+      </label>
+      <label>Dot contrast (luminance span)
+        <input name="dot_contrast" type="number" value="1.0" min="0" max="2" step="0.01" />
+      </label>
+
+      <label>Seed (optional)
+        <input name="seed" type="number" value="" />
+      </label>
+
+      <div class="row">
+        <label style="grid-auto-flow: column; align-items: center; gap: 8px;">
+          <input name="reassign_life" type="checkbox" checked />
+          Reassign signal/noise on respawn
+        </label>
+        <button type="submit">Generate</button>
+      </div>
+    </form>
+
+    <div class="note">
+      Generates an .mp4 preview and a .zip of frames. Mean dot luminance is balanced to equal the background.
+    </div>
+  </body>
+</html>
