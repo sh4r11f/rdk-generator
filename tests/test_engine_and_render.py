@@ -41,7 +41,13 @@ def test_renderer_outputs_uint8_shape():
         dot_low_lum=None,
         dot_high_lum=None,
     )
-    r = FrameRenderer(width_px=256, height_px=256, background_lum=0.4, field_center_xy_px=(0.0, 0.0), dot_size_px=3)
+    r = FrameRenderer(
+        width_px=256,
+        height_px=256,
+        background_lum=0.4,
+        field_center_xy_px=(0.0, 0.0),
+        dot_size_px=3,
+    )
     frame = r.render(e.xys, e.dot_lum, e.compute_opacity())
     assert frame.dtype == np.uint8
     assert frame.shape == (256, 256)
@@ -66,7 +72,9 @@ def test_frame_mean_close_to_background_reasonable():
         dot_low_lum=None,
         dot_high_lum=None,
     )
-    r = FrameRenderer(width_px=128, height_px=128, background_lum=bg, field_center_xy_px=(0.0, 0.0), dot_size_px=2)
+    r = FrameRenderer(
+        width_px=128, height_px=128, background_lum=bg, field_center_xy_px=(0.0, 0.0), dot_size_px=2
+    )
     frame = r.render(e.xys, e.dot_lum, e.compute_opacity())
     mean = frame.mean() / 255.0
     assert abs(mean - bg) < 0.15

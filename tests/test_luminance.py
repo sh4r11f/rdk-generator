@@ -25,7 +25,9 @@ def test_assign_binary_luminances_exact_mean_close():
 
 
 def test_resolve_dot_luminances_from_contrast():
-    lo, hi = resolve_dot_luminances(background_lum=0.5, dot_contrast=1.0, dot_low_lum=None, dot_high_lum=None)
+    lo, hi = resolve_dot_luminances(
+        background_lum=0.5, dot_contrast=1.0, dot_low_lum=None, dot_high_lum=None
+    )
     assert lo < hi
     assert 0.0 <= lo <= 1.0
     assert 0.0 <= hi <= 1.0

@@ -61,4 +61,4 @@ def test_generate_renders_preview_on_index(monkeypatch, tmp_path: Path):
     assert b"Download .mp4" in r.data
     assert b"Download frames" in r.data
     # Sticky form value
-    assert b"value=\"111\"" in r.data
+    assert b'value="111"' in r.data
