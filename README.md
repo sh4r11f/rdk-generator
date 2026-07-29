@@ -36,7 +36,9 @@ from rdk_generator import RDKParams, RenderParams
 from rdk_generator.export import write_mp4, write_frames_zip
 
 rdk = RDKParams(n_dots=300, coherence=0.5, direction_deg=90, field_diam_px=300)
-render = RenderParams(width_px=512, height_px=512, fps=60, duration_s=1.0, background_lum=0.5, dot_contrast=1.0)
+render = RenderParams(
+    width_px=512, height_px=512, fps=60, duration_s=1.0, background_lum=0.5, dot_contrast=1.0
+)
 
 write_mp4("out/stimulus.mp4", rdk=rdk, render=render)
 write_frames_zip("out/frames.zip", rdk=rdk, render=render)

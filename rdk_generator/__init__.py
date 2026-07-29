@@ -8,13 +8,13 @@ This package provides:
 PsychoPy integration is optional and lives in `rdk_generator.psychopy_adapter`.
 """
 
+from .export import render_frames, write_frames_zip, write_mp4
 from .params import RDKParams, RenderParams
-from .export import render_frames, write_mp4, write_frames_zip
 
 __all__ = [
     "RDKParams",
     "RenderParams",
     "render_frames",
-    "write_mp4",
     "write_frames_zip",
+    "write_mp4",
 ]

@@ -42,7 +42,9 @@ class RDKEngine:
         self.speed_px_per_s = float(speed_px_per_s)
         self.field_diam = float(field_diam_px)
         self.radius = self.field_diam / 2.0
-        self.gauss_sigma = float(gauss_sigma_px) if gauss_sigma_px is not None else (self.radius / 2.0)
+        self.gauss_sigma = (
+            float(gauss_sigma_px) if gauss_sigma_px is not None else (self.radius / 2.0)
+        )
         self.reassign_life = bool(reassign_life)
         self.fps = int(max(1, fps))
 
@@ -166,7 +168,7 @@ class NonOverlappingRDKEngine(RDKEngine):
             x = float(cand[0])
             y = float(cand[1])
             ok = True
-            for (px, py) in pts:
+            for px, py in pts:
                 dx = x - px
                 dy = y - py
                 if dx * dx + dy * dy < min_sep_sq:
@@ -209,7 +211,7 @@ class NonOverlappingRDKEngine(RDKEngine):
                     ok = False
 
             if ok and new_pts:
-                for (px, py) in new_pts:
+                for px, py in new_pts:
                     dx2 = x - px
                     dy2 = y - py
                     if dx2 * dx2 + dy2 * dy2 < min_sep_sq:
@@ -291,7 +293,7 @@ class FrameRenderer:
     def _make_disk_mask(dot_size_px: int) -> np.ndarray:
         r = max(0.5, dot_size_px / 2.0)
         rad = int(math.ceil(r))
-        ys, xs = np.mgrid[-rad: rad + 1, -rad: rad + 1]
+        ys, xs = np.mgrid[-rad : rad + 1, -rad : rad + 1]
         mask = (xs * xs + ys * ys) <= (r * r)
         return mask
 

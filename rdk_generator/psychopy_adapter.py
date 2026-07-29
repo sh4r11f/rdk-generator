@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """Optional PsychoPy integration.
 
 This module is designed to be importable even when PsychoPy is not installed.
@@ -9,6 +7,8 @@ This module provides a PsychoPy implementation for gaussian-masked motion and a
 luminance-balanced variant that assigns black/white dots so the *mean* dot
 luminance matches the background.
 """
+
+from __future__ import annotations
 
 import numpy as np
 
@@ -148,7 +148,7 @@ class BalancedGaussianRDK:  # pragma: no cover (requires PsychoPy runtime)
 
     def _compute_opacity(self, xys):
         r2 = np.sum(xys**2, axis=1)
-        sigma2 = (self.gauss_sigma**2)
+        sigma2 = self.gauss_sigma**2
         if sigma2 <= 0:
             return np.ones(self.n, dtype=float)
         alpha = np.exp(-0.5 * r2 / sigma2)
