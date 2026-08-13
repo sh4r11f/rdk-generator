@@ -22,7 +22,9 @@ The Flask webapp (`rdk_generator/webapp/`) is a thin localhost-only UI over `exp
 
 - Public constructors/functions take keyword-only arguments (bare `*`); dataclasses are `frozen=True, slots=True`; Google-style docstrings; `from __future__ import annotations` in every module.
 - `direction_deg` uses the PsychoPy convention: 0° = right, 90° = up. Dot positions are stored relative to field center; `FrameRenderer.render` flips Y when converting to pixel coordinates.
-- `render_frames` selects `NonOverlappingRDKEngine` iff `min_sep_px is not None` (recommended ≈ 1.1 × dot_size_px), otherwise `RDKEngine`.
+- `methods.py` is the single registry of algorithms (see docs/methods.md). A `MethodSpec` names its engine, the params it accepts, its prose description, and its citations; `export.build_engine` and the webapp both read from it, so adding a method means adding a `MethodSpec` and nothing else. Don't hardcode method lists elsewhere.
+- `RDKParams.dot_life_frames=None` means "use the method's canonical default" (0 for `movshon_newsome`, 12 otherwise). `gauss_sigma_px`/`min_sep_px` of `None` or 0 likewise mean "derive it" (envelope σ = field_diam/4; separation = 1.1 × dot_size_px).
+- Only `gaussian_nonoverlap` gets the Gaussian envelope and the minimum separation — those two modifications are what distinguish it from its `brownian` base. Luminance balancing is *not* part of any method: it's the render-level `luminance_mode="balanced"`, available to all of them.
 - Frames are 8-bit single-channel grayscale arrays of shape `(height, width)`; `write_mp4` also writes a `<name>.json` params sidecar used by the webapp's `/meta/` route.
 
 ## Gotchas

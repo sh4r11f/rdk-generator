@@ -5,190 +5,393 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>RDK Generator</title>
     <style>
-      * { box-sizing: border-box; }
+      *, *::before, *::after { box-sizing: border-box; }
 
       :root {
-        --bg: #0b0f19;
-        --panel: #111827;
-        --panel2: #0f172a;
-        --text: #e5e7eb;
-        --muted: #94a3b8;
-        --border: rgba(255,255,255,0.10);
-        --accent: #60a5fa;
+        --bg: #070b14;
+        --panel: rgba(255, 255, 255, 0.035);
+        --panel-solid: #0e1421;
+        --text: #e8edf7;
+        --muted: #93a1bb;
+        --faint: #64748b;
+        --border: rgba(255, 255, 255, 0.09);
+        --border-strong: rgba(255, 255, 255, 0.16);
+        --accent: #5eafff;
+        --accent-dim: rgba(94, 175, 255, 0.16);
+        --ours: #fbbf24;
+        --radius: 14px;
       }
 
       body {
-        font-family: system-ui, -apple-system, sans-serif;
         margin: 0;
-        background: radial-gradient(1200px 600px at 20% 0%, rgba(96,165,250,0.22), transparent 55%), var(--bg);
+        font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+        background:
+          radial-gradient(1100px 520px at 12% -8%, rgba(94, 175, 255, 0.16), transparent 60%),
+          radial-gradient(900px 500px at 92% 4%, rgba(251, 191, 36, 0.07), transparent 55%),
+          var(--bg);
         color: var(--text);
+        line-height: 1.5;
+        -webkit-font-smoothing: antialiased;
       }
 
-      .container { max-width: 1060px; margin: 0 auto; padding: 28px 18px 40px; }
-      header { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; margin-bottom: 18px; }
-      h1 { font-size: 22px; margin: 0; letter-spacing: 0.2px; }
-      .subtitle { color: var(--muted); font-size: 13px; }
+      .container { max-width: 1240px; margin: 0 auto; padding: 32px 20px 56px; }
 
-      .grid { display: grid; grid-template-columns: 380px 1fr; gap: 16px; }
-      @media (max-width: 980px) { .grid { grid-template-columns: 1fr; } }
+      header { margin-bottom: 26px; }
+      h1 { font-size: 24px; margin: 0 0 4px; letter-spacing: -0.01em; font-weight: 620; }
+      .subtitle { color: var(--muted); font-size: 13.5px; }
+      .subtitle code {
+        font-size: 12.5px; background: rgba(255,255,255,0.06);
+        padding: 1px 6px; border-radius: 5px; color: var(--text);
+      }
 
       .card {
-        background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));
+        background: var(--panel);
         border: 1px solid var(--border);
-        border-radius: 14px;
-        padding: 14px;
-        backdrop-filter: blur(8px);
+        border-radius: var(--radius);
+        padding: 18px;
       }
 
-      .card h2 { font-size: 14px; margin: 0 0 10px; color: var(--text); }
-      .hint { color: var(--muted); font-size: 12px; margin: 0 0 10px; line-height: 1.35; }
-
-      form { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
-      label { display: grid; gap: 6px; font-size: 12px; color: var(--muted); min-width: 0; }
-      input {
-        padding: 9px 10px;
-        font-size: 13px;
-        border-radius: 10px;
-        border: 1px solid var(--border);
-        background: rgba(15, 23, 42, 0.55);
-        color: var(--text);
-        outline: none;
-        width: 100%;
-        min-width: 0;
+      .section-title {
+        font-size: 11px; text-transform: uppercase; letter-spacing: 0.09em;
+        color: var(--faint); font-weight: 650; margin: 0 0 12px;
       }
-      input:focus { border-color: rgba(96,165,250,0.55); box-shadow: 0 0 0 3px rgba(96,165,250,0.15); }
 
-      .row { grid-column: 1 / -1; display: flex; gap: 12px; align-items: center; margin-top: 4px; }
-      .check { display: inline-flex; gap: 8px; align-items: center; color: var(--muted); font-size: 12px; }
-      .check input { width: 16px; height: 16px; }
-
-      button {
-        padding: 10px 12px;
-        font-size: 13px;
-        border-radius: 10px;
-        border: 1px solid rgba(96,165,250,0.5);
-        background: rgba(96,165,250,0.18);
-        color: var(--text);
-        cursor: pointer;
+      /* ---- method picker ---- */
+      .methods {
+        display: grid; gap: 10px; margin-bottom: 18px;
+        grid-template-columns: repeat(auto-fit, minmax(196px, 1fr));
       }
-      button:hover { background: rgba(96,165,250,0.26); }
+      .method {
+        text-align: left; cursor: pointer; font: inherit; color: inherit;
+        background: var(--panel); border: 1px solid var(--border);
+        border-radius: 12px; padding: 13px 14px; transition: border-color .15s, background .15s, transform .1s;
+        display: flex; flex-direction: column; gap: 5px; min-width: 0;
+      }
+      .method:hover { border-color: var(--border-strong); background: rgba(255,255,255,0.055); }
+      .method:active { transform: translateY(1px); }
+      .method[aria-pressed="true"] {
+        border-color: rgba(94, 175, 255, 0.65);
+        background: var(--accent-dim);
+        box-shadow: 0 0 0 3px rgba(94, 175, 255, 0.1);
+      }
+      .method-top { display: flex; align-items: center; gap: 8px; }
+      .badge {
+        font-size: 10.5px; font-weight: 700; letter-spacing: 0.04em;
+        padding: 2px 7px; border-radius: 999px; flex: none;
+        background: rgba(94,175,255,0.18); color: #b3d9ff; border: 1px solid rgba(94,175,255,0.3);
+      }
+      .badge.ours {
+        background: rgba(251,191,36,0.15); color: #fcd34d; border-color: rgba(251,191,36,0.32);
+      }
+      .method-name { font-size: 13.5px; font-weight: 580; min-width: 0; }
+      .method-tag { font-size: 11.5px; color: var(--muted); line-height: 1.4; }
 
-      .actions { display: flex; gap: 10px; align-items: center; }
-      .links { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
-      a { color: var(--text); text-decoration: none; border: 1px solid var(--border); padding: 9px 10px; border-radius: 10px; background: rgba(15,23,42,0.35); }
-      a:hover { border-color: rgba(96,165,250,0.45); }
-      video { width: 100%; border-radius: 12px; border: 1px solid var(--border); background: var(--panel2); }
-      .empty { color: var(--muted); font-size: 13px; padding: 10px 0 0; }
+      /* ---- layout ---- */
+      .grid { display: grid; grid-template-columns: minmax(0, 420px) minmax(0, 1fr); gap: 18px; align-items: start; }
+      @media (max-width: 1000px) { .grid { grid-template-columns: 1fr; } }
+
+      .right { display: grid; gap: 18px; position: sticky; top: 20px; }
+      @media (max-width: 1000px) { .right { position: static; } }
+
+      /* ---- form ---- */
+      fieldset { border: 0; margin: 0 0 20px; padding: 0; }
+      fieldset:last-of-type { margin-bottom: 14px; }
+      .fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start; }
+      .field { display: grid; align-content: start; gap: 5px; min-width: 0; }
+      .field.wide { grid-column: 1 / -1; }
+      .field > span { font-size: 12px; color: var(--muted); font-weight: 500; }
+      .field small { font-size: 11px; color: var(--faint); line-height: 1.4; }
+
+      input[type="number"], select {
+        width: 100%; min-width: 0; padding: 8px 10px; font: inherit; font-size: 13px;
+        color: var(--text); background: rgba(6, 11, 22, 0.66);
+        border: 1px solid var(--border); border-radius: 9px; outline: none;
+      }
+      select { appearance: none; cursor: pointer; padding-right: 28px;
+        background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+                          linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+        background-position: right 13px top 15px, right 8px top 15px;
+        background-size: 5px 5px, 5px 5px; background-repeat: no-repeat; }
+      input[type="number"]:focus, select:focus {
+        border-color: rgba(94,175,255,0.6); box-shadow: 0 0 0 3px rgba(94,175,255,0.13);
+      }
+      .slider-row { display: grid; grid-template-columns: 1fr 74px; gap: 9px; align-items: center; }
+      input[type="range"] { width: 100%; accent-color: var(--accent); cursor: pointer; }
+
+      button.primary {
+        width: 100%; padding: 11px 14px; font: inherit; font-size: 13.5px; font-weight: 580;
+        color: #04121f; background: linear-gradient(180deg, #7cc0ff, #4a9ef0);
+        border: 0; border-radius: 10px; cursor: pointer;
+      }
+      button.primary:hover { filter: brightness(1.07); }
+      .meta-line { text-align: center; font-size: 11.5px; color: var(--faint); margin-top: 9px; }
+
+      /* ---- preview ---- */
+      /* `width: auto` keeps the video at its rendered pixel size: upscaling a small
+         stimulus would smear the dots and misrepresent what was generated. */
+      video {
+        display: block; margin: 0 auto; width: auto; max-width: 100%; max-height: 560px;
+        border-radius: 11px; border: 1px solid var(--border); background: #05080f;
+      }
+      .placeholder {
+        min-height: 280px; display: grid; place-content: center; gap: 6px; text-align: center;
+        border: 1px dashed var(--border-strong); border-radius: 11px;
+        color: var(--faint); font-size: 13px; background: rgba(5, 8, 15, 0.45);
+      }
+      .links { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+      .links a {
+        font-size: 12px; color: var(--text); text-decoration: none; padding: 7px 11px;
+        border: 1px solid var(--border); border-radius: 9px; background: rgba(255,255,255,0.03);
+      }
+      .links a:hover { border-color: rgba(94,175,255,0.5); }
+      .preview-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+      .preview-head .who { font-size: 11.5px; color: var(--muted); }
+
+      /* ---- docs ---- */
+      .doc-title { font-size: 16px; font-weight: 600; margin: 0 0 4px; }
+      .doc-tagline { color: var(--muted); font-size: 13px; margin: 0 0 14px; }
+      .callout {
+        font-size: 12.5px; color: var(--muted); background: rgba(94,175,255,0.07);
+        border-left: 2px solid rgba(94,175,255,0.5); border-radius: 0 7px 7px 0;
+        padding: 9px 12px; margin: 0 0 16px;
+      }
+      .callout b { color: var(--text); font-weight: 580; }
+      .doc h4 {
+        font-size: 11px; text-transform: uppercase; letter-spacing: 0.09em;
+        color: var(--faint); font-weight: 650; margin: 18px 0 9px;
+      }
+      .doc ol, .doc ul { margin: 0; padding-left: 20px; }
+      .doc li { font-size: 13px; color: var(--muted); margin-bottom: 7px; line-height: 1.55; }
+      .doc ol li::marker { color: var(--accent); font-weight: 600; }
+      .refs { list-style: none; padding: 0; }
+      .refs li { margin-bottom: 9px; font-size: 12px; line-height: 1.5; }
+      .refs a { color: var(--accent); text-decoration: none; }
+      .refs a:hover { text-decoration: underline; }
+
+      /* ---- busy overlay ---- */
+      .overlay {
+        position: fixed; inset: 0; display: none; place-content: center; justify-items: center;
+        gap: 14px; background: rgba(7, 11, 20, 0.86); backdrop-filter: blur(3px); z-index: 50;
+      }
+      .overlay.on { display: grid; }
+      .spinner {
+        width: 34px; height: 34px; border-radius: 50%;
+        border: 3px solid rgba(255,255,255,0.14); border-top-color: var(--accent);
+        animation: spin .8s linear infinite;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      .overlay p { margin: 0; color: var(--muted); font-size: 13px; }
     </style>
   </head>
   <body>
     <div class="container">
       <header>
-        <div>
-          <h1>RDK Generator</h1>
-          <div class="subtitle">Gaussian envelope • Luminance-balanced dots • MP4 + frame export</div>
+        <h1>RDK Generator</h1>
+        <div class="subtitle">
+          Four canonical random-dot-kinematogram algorithms plus a Gaussian non-overlapping
+          variant &middot; MP4 and frame export &middot; see <code>docs/methods.md</code>
         </div>
       </header>
 
+      <p class="section-title">Method</p>
+      <div class="methods" id="methods" role="group" aria-label="RDK method"></div>
+
       <div class="grid">
-        <section class="card">
-          <h2>Parameters</h2>
-          <p class="hint">The form remembers the last values you generated in this browser session.</p>
+        <form class="card" method="post" action="/generate" id="form">
+          <input type="hidden" name="method" id="method-input" value="{{ selected }}" />
+          <div id="fields"></div>
+          <button class="primary" type="submit">Generate preview</button>
+          <div class="meta-line" id="frame-count"></div>
+        </form>
 
-          <form method="post" action="/generate">
-            <label>Dots
-              <input name="n_dots" type="number" value="{{ params.get('n_dots', 300) }}" min="1" />
-            </label>
-            <label>Dot size (px)
-              <input name="dot_size_px" type="number" value="{{ params.get('dot_size_px', 3) }}" min="1" />
-            </label>
-
-            <label>Speed (px/s)
-              <input name="speed_px_per_s" type="number" value="{{ params.get('speed_px_per_s', 120) }}" step="1" />
-            </label>
-            <label>Dot life (frames)
-              <input name="dot_life_frames" type="number" value="{{ params.get('dot_life_frames', 12) }}" min="1" />
-            </label>
-
-            <label>Direction (deg)
-              <input name="direction_deg" type="number" value="{{ params.get('direction_deg', 0) }}" step="1" />
-            </label>
-            <label>Coherence (0..1)
-              <input name="coherence" type="number" value="{{ params.get('coherence', 0.5) }}" min="0" max="1" step="0.01" />
-            </label>
-
-            <label>Field diameter (px)
-              <input name="field_diam_px" type="number" value="{{ params.get('field_diam_px', 300) }}" min="1" />
-            </label>
-            <label>Gaussian sigma (px)
-              <input name="gauss_sigma_px" type="number" value="{{ params.get('gauss_sigma_px', 0) }}" min="0" step="1" />
-            </label>
-
-            <label>Width (px)
-              <input name="width_px" type="number" value="{{ params.get('width_px', 512) }}" min="16" step="1" />
-            </label>
-            <label>Height (px)
-              <input name="height_px" type="number" value="{{ params.get('height_px', 512) }}" min="16" step="1" />
-            </label>
-
-            <label>FPS
-              <input name="fps" type="number" value="{{ params.get('fps', 60) }}" min="1" />
-            </label>
-            <label>Duration (s)
-              <input name="duration_s" type="number" value="{{ params.get('duration_s', 1.0) }}" min="0.1" step="0.1" />
-            </label>
-
-            <label>Background luminance (0..1)
-              <input name="background_lum" type="number" value="{{ params.get('background_lum', 0.5) }}" min="0" max="1" step="0.01" />
-            </label>
-            <label>Dot contrast
-              <input name="dot_contrast" type="number" value="{{ params.get('dot_contrast', 1.0) }}" min="0" max="2" step="0.01" />
-            </label>
-
-            <label>Seed (optional)
-              <input name="seed" type="number" value="{{ params.get('seed', '') }}" />
-            </label>
-
-            <label>Min separation (px)
-              <input name="min_sep_px" type="number" value="{{ params.get('min_sep_px', '') }}" min="0" step="0.1" />
-            </label>
-
-            <div class="row">
-              <label class="check">
-                <input name="reassign_life" type="checkbox" {% if params.get('reassign_life', 'on') == 'on' %}checked{% endif %} />
-                Reassign signal/noise on respawn
-              </label>
-              <label class="check">
-                <input name="prevent_overlap" type="checkbox" {% if params.get('prevent_overlap', '') == 'on' %}checked{% endif %} />
-                Prevent overlap
-              </label>
-              <div class="actions">
-                <button type="submit">Generate preview</button>
+        <div class="right">
+          <section class="card">
+            <div class="preview-head">
+              <p class="section-title" style="margin-bottom:12px">Preview</p>
+              {% if mp4_url and preview_method %}
+                <span class="who">{{ preview_method }}</span>
+              {% endif %}
+            </div>
+            {% if mp4_url %}
+              <video controls autoplay loop muted playsinline>
+                <source src="{{ mp4_url }}" type="video/mp4" />
+                Your browser does not support the video tag.
+              </video>
+              <div class="links">
+                <a href="{{ mp4_url }}">Download .mp4</a>
+                <a href="{{ zip_url }}">Frames (.zip)</a>
+                <a href="/meta/{{ job_id }}">Params (.json)</a>
               </div>
-            </div>
-          </form>
-        </section>
+            {% else %}
+              <div class="placeholder">
+                <div>No preview yet</div>
+                <div style="font-size:12px">Pick a method, set parameters, then generate.</div>
+              </div>
+            {% endif %}
+          </section>
 
-        <section class="card">
-          <h2>Preview</h2>
-          <p class="hint">Exports are generated server-side. Download links appear after generation.</p>
-
-          {% if mp4_url %}
-            <video controls autoplay loop muted playsinline>
-              <source src="{{ mp4_url }}" type="video/mp4" />
-              Your browser does not support the video tag.
-            </video>
-
-            <div class="links">
-              <a href="{{ mp4_url }}">Download .mp4</a>
-              <a href="{{ zip_url }}">Download frames (.zip)</a>
-              <a href="/meta/{{ job_id }}">Params (.json)</a>
-            </div>
-          {% else %}
-            <div class="empty">No preview yet. Click “Generate preview”.</div>
-          {% endif %}
-        </section>
+          <section class="card doc" id="doc"></section>
+        </div>
       </div>
     </div>
+
+    <div class="overlay" id="overlay">
+      <div class="spinner"></div>
+      <p>Rendering frames&hellip; this blocks until the video is written.</p>
+    </div>
+
+    <script>
+      const METHODS = {{ methods_json|safe }};
+      const SAVED = {{ saved_json|safe }};
+      const GROUP_ORDER = {{ group_order|tojson }};
+      const GROUP_LABELS = {{ group_labels|tojson }};
+
+      const byId = Object.fromEntries(METHODS.map((m) => [m.id, m]));
+      let currentId = byId[{{ selected|tojson }}] ? {{ selected|tojson }} : METHODS[0].id;
+
+      const esc = (s) =>
+        String(s).replace(/[&<>"']/g, (c) =>
+          ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]
+        );
+
+      function valueFor(method, param) {
+        const saved = SAVED[method.id];
+        if (saved && Object.prototype.hasOwnProperty.call(saved, param.name)) {
+          return saved[param.name];
+        }
+        return param.default;
+      }
+
+      function attrs(param) {
+        const bits = [];
+        if (param.min !== null) bits.push(`min="${param.min}"`);
+        if (param.max !== null) bits.push(`max="${param.max}"`);
+        if (param.step !== null) bits.push(`step="${param.step}"`);
+        return bits.join(" ");
+      }
+
+      function fieldHtml(method, param) {
+        const value = valueFor(method, param);
+        const help = param.help ? `<small>${esc(param.help)}</small>` : "";
+        // Only dropdowns span both columns; widening by help-text length made the
+        // two-column grid look ragged.
+        const wide = param.kind === "choice";
+        let control;
+
+        if (param.kind === "choice") {
+          const opts = param.choices
+            .map(
+              (c) =>
+                `<option value="${esc(c.value)}"${c.value === value ? " selected" : ""}>` +
+                `${esc(c.label)}</option>`
+            )
+            .join("");
+          control = `<select name="${param.name}">${opts}</select>`;
+        } else if (param.kind === "float" && param.min !== null && param.max !== null) {
+          // Bounded floats get a slider paired with the number box.
+          control =
+            `<div class="slider-row">` +
+            `<input type="range" ${attrs(param)} value="${esc(value)}" data-sync="${param.name}" />` +
+            `<input type="number" name="${param.name}" ${attrs(param)} value="${esc(value)}" />` +
+            `</div>`;
+        } else {
+          control = `<input type="number" name="${param.name}" ${attrs(param)} value="${esc(value)}" />`;
+        }
+
+        return (
+          `<label class="field${wide ? " wide" : ""}">` +
+          `<span>${esc(param.label)}</span>${control}${help}</label>`
+        );
+      }
+
+      function renderMethods() {
+        document.getElementById("methods").innerHTML = METHODS.map(
+          (m) =>
+            `<button type="button" class="method" data-id="${m.id}" ` +
+            `aria-pressed="${m.id === currentId}">` +
+            `<span class="method-top">` +
+            `<span class="badge${m.canonical ? "" : " ours"}">${esc(m.short)}</span>` +
+            `<span class="method-name">${esc(m.label)}</span></span>` +
+            `<span class="method-tag">${esc(m.tagline)}</span></button>`
+        ).join("");
+      }
+
+      function renderFields() {
+        const method = byId[currentId];
+        const html = GROUP_ORDER.map((group) => {
+          const params = method.params.filter((p) => p.group === group);
+          if (!params.length) return "";
+          return (
+            `<fieldset><p class="section-title">${esc(GROUP_LABELS[group])}</p>` +
+            `<div class="fields">${params.map((p) => fieldHtml(method, p)).join("")}</div>` +
+            `</fieldset>`
+          );
+        }).join("");
+        document.getElementById("fields").innerHTML = html;
+        document.getElementById("method-input").value = currentId;
+        wireSliders();
+        updateFrameCount();
+      }
+
+      function renderDoc() {
+        const m = byId[currentId];
+        const steps = m.steps.map((s) => `<li>${esc(s)}</li>`).join("");
+        const notes = m.notes.map((s) => `<li>${esc(s)}</li>`).join("");
+        const refs = m.references
+          .map(
+            (r) =>
+              `<li><a href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">` +
+              `${esc(r.citation)}</a></li>`
+          )
+          .join("");
+        document.getElementById("doc").innerHTML =
+          `<h3 class="doc-title">${esc(m.label)}</h3>` +
+          `<p class="doc-tagline">${esc(m.tagline)}</p>` +
+          `<p class="callout"><b>Noise rule.</b> ${esc(m.noise_rule)}</p>` +
+          `<h4>How each frame is generated</h4><ol>${steps}</ol>` +
+          (notes ? `<h4>Notes</h4><ul>${notes}</ul>` : "") +
+          (refs ? `<h4>References</h4><ul class="refs">${refs}</ul>` : "");
+      }
+
+      function wireSliders() {
+        document.querySelectorAll('input[data-sync]').forEach((range) => {
+          const number = range.parentElement.querySelector('input[type="number"]');
+          range.addEventListener("input", () => (number.value = range.value));
+          number.addEventListener("input", () => (range.value = number.value));
+        });
+      }
+
+      function updateFrameCount() {
+        const form = document.getElementById("form");
+        const fps = Number(form.elements.fps?.value);
+        const duration = Number(form.elements.duration_s?.value);
+        const target = document.getElementById("frame-count");
+        target.textContent =
+          fps > 0 && duration > 0
+            ? `${Math.max(1, Math.round(fps * duration))} frames at ${fps} fps`
+            : "";
+      }
+
+      function select(id) {
+        if (!byId[id] || id === currentId) return;
+        currentId = id;
+        renderMethods();
+        renderFields();
+        renderDoc();
+      }
+
+      document.getElementById("methods").addEventListener("click", (e) => {
+        const button = e.target.closest(".method");
+        if (button) select(button.dataset.id);
+      });
+      document.getElementById("form").addEventListener("input", updateFrameCount);
+      document.getElementById("form").addEventListener("submit", () => {
+        document.getElementById("overlay").classList.add("on");
+      });
+
+      renderMethods();
+      renderFields();
+      renderDoc();
+    </script>
   </body>
 </html>

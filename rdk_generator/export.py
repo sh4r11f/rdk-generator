@@ -10,8 +10,47 @@ import imageio.v2 as imageio
 import numpy as np
 from PIL import Image
 
-from .core import FrameRenderer, NonOverlappingRDKEngine, RDKEngine
+from .core import BaseRDKEngine, FrameRenderer
+from .methods import get_method
 from .params import RDKParams, RenderParams
+
+
+def build_engine(rdk: RDKParams, render: RenderParams) -> BaseRDKEngine:
+    """Construct the engine for `rdk.method`, passing only the params it accepts."""
+    spec = get_method(rdk.method)
+
+    kwargs: dict = {
+        "n_dots": rdk.n_dots,
+        "coherence": rdk.coherence,
+        "direction_deg": rdk.direction_deg,
+        "speed_px_per_s": rdk.speed_px_per_s,
+        "field_diam_px": rdk.field_diam_px,
+        "fps": render.fps,
+        "seed": render.seed,
+        "background_lum": render.background_lum,
+        "dot_contrast": render.dot_contrast,
+        "dot_low_lum": render.dot_low_lum,
+        "dot_high_lum": render.dot_high_lum,
+        "luminance_mode": render.luminance_mode,
+    }
+
+    accepted = set(spec.method_params)
+    if "dot_life_frames" in accepted:
+        life = rdk.dot_life_frames
+        kwargs["dot_life_frames"] = int(
+            spec.default_for("dot_life_frames") if life is None else life
+        )
+    if "signal_rule" in accepted:
+        kwargs["signal_rule"] = rdk.signal_rule
+    if "n_sequences" in accepted:
+        kwargs["n_sequences"] = rdk.n_sequences
+    if "gauss_sigma_px" in accepted:
+        # 0 and None both mean "use the method's default width".
+        kwargs["gauss_sigma_px"] = rdk.gauss_sigma_px or None
+    if "min_sep_px" in accepted:
+        kwargs["min_sep_px"] = rdk.min_sep_px or (1.1 * float(rdk.dot_size_px))
+
+    return spec.engine(**kwargs)
 
 
 def render_frames(rdk: RDKParams, render: RenderParams) -> list[np.ndarray]:
@@ -19,28 +58,7 @@ def render_frames(rdk: RDKParams, render: RenderParams) -> list[np.ndarray]:
     n_frames = int(round(render.duration_s * render.fps))
     n_frames = max(1, n_frames)
 
-    engine_cls = NonOverlappingRDKEngine if rdk.min_sep_px is not None else RDKEngine
-    engine_kwargs = {}
-    if rdk.min_sep_px is not None:
-        engine_kwargs["min_sep_px"] = float(rdk.min_sep_px)
-
-    engine = engine_cls(
-        n_dots=rdk.n_dots,
-        dot_life_frames=rdk.dot_life_frames,
-        coherence=rdk.coherence,
-        direction_deg=rdk.direction_deg,
-        speed_px_per_s=rdk.speed_px_per_s,
-        field_diam_px=rdk.field_diam_px,
-        gauss_sigma_px=(rdk.gauss_sigma_px if rdk.gauss_sigma_px is not None else None),
-        reassign_life=rdk.reassign_life,
-        fps=render.fps,
-        seed=render.seed,
-        background_lum=render.background_lum,
-        dot_contrast=render.dot_contrast,
-        dot_low_lum=render.dot_low_lum,
-        dot_high_lum=render.dot_high_lum,
-        **engine_kwargs,
-    )
+    engine = build_engine(rdk, render)
 
     renderer = FrameRenderer(
         width_px=render.width_px,
