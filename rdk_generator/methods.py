@@ -17,6 +17,7 @@ from urllib.parse import quote_plus
 from .core import (
     BaseRDKEngine,
     BrownianRDKEngine,
+    GaussianNonOverlapMNEngine,
     GaussianNonOverlapRDKEngine,
     MovshonNewsomeRDKEngine,
     RandomDirectionRDKEngine,
@@ -313,6 +314,7 @@ class MethodSpec:
     id: str
     label: str
     short: str
+    tab: str
     engine: type[BaseRDKEngine]
     tagline: str
     noise_rule: str
@@ -338,6 +340,7 @@ class MethodSpec:
             "id": self.id,
             "label": self.label,
             "short": self.short,
+            "tab": self.tab,
             "tagline": self.tagline,
             "noise_rule": self.noise_rule,
             "steps": list(self.steps),
@@ -445,6 +448,7 @@ METHODS: dict[str, MethodSpec] = {
         id="movshon_newsome",
         label="Movshon-Newsome",
         short="MN",
+        tab="Movshon-Newsome",
         engine=MovshonNewsomeRDKEngine,
         tagline="The three-sequence classic behind the MT and decision-making literature.",
         noise_rule="Relocated to a random position when its sequence updates.",
@@ -474,6 +478,7 @@ METHODS: dict[str, MethodSpec] = {
         id="brownian",
         label="Brownian (random walk)",
         short="BM",
+        tab="Brownian",
         engine=BrownianRDKEngine,
         tagline="Speed-matched random-walk noise; the common psychophysics default.",
         noise_rule="Steps at signal speed in a fresh random direction every frame.",
@@ -499,6 +504,7 @@ METHODS: dict[str, MethodSpec] = {
         id="white_noise",
         label="White noise (random position)",
         short="WN",
+        tab="White noise",
         engine=WhiteNoiseRDKEngine,
         tagline="Noise dots teleport anywhere each frame - dynamic visual noise.",
         noise_rule="Relocated to a random position in the aperture every frame.",
@@ -523,6 +529,7 @@ METHODS: dict[str, MethodSpec] = {
         id="random_direction",
         label="Random direction",
         short="RD",
+        tab="Random direction",
         engine=RandomDirectionRDKEngine,
         tagline="Every noise dot keeps one heading for life - looks like transparent motion.",
         noise_rule="Moves at signal speed along a heading fixed when the dot was born.",
@@ -548,10 +555,53 @@ METHODS: dict[str, MethodSpec] = {
     ),
     "gaussian_nonoverlap": MethodSpec(
         id="gaussian_nonoverlap",
-        label="Gaussian non-overlapping",
+        label="Gaussian non-overlapping (MN)",
         short="Ours",
+        tab="Ours (MN)",
+        engine=GaussianNonOverlapMNEngine,
+        tagline="The Movshon-Newsome method with a soft aperture and evenly spaced dots.",
+        noise_rule="Relocated to a random position when its sequence updates, subject to "
+        "the minimum separation (inherited from Movshon-Newsome).",
+        canonical=False,
+        steps=(
+            "Place every dot by rejection sampling so no two centres are closer than the "
+            "minimum separation - blue-noise placement rather than uniform.",
+            "Assign each dot to one of 3 interleaved sequences.",
+            "Run the Movshon-Newsome motion unchanged: update only the sequence whose turn "
+            "it is, displacing each of its dots in the signal direction with probability "
+            "equal to the coherence and relocating the rest.",
+            _EXIT_STEP,
+            "Replant any dots that ended the step too close to a neighbour, sacrificing "
+            "noise dots first so coherent displacements survive.",
+            "Scale each dot's opacity by a Gaussian in its distance from the field centre, "
+            "alpha = exp(-r^2 / 2 sigma^2), so the aperture has no hard edge.",
+        ),
+        notes=(
+            "Motion is identical to Movshon-Newsome, so coherence is directly comparable "
+            "between the two. The modifications are placement and rendering only.",
+            "The Gaussian envelope removes the aperture contour and the abrupt onset and "
+            "offset dots get as they cross a hard edge.",
+            "Even spacing keeps the visible dot count stable and stops apparent contrast "
+            "varying with chance clustering.",
+            "Cost: replanting a violator is a teleport, and in this method one coherent "
+            "displacement stands in for 3 frames of signal. Violation resolution therefore "
+            "displaces noise dots by preference, but effective coherence can still sit "
+            "marginally below nominal.",
+            "The Brownian-based variant enforces the same modifications more cheaply, since "
+            "its dots move a pixel or two per frame instead of teleporting.",
+        ),
+        references=(_REF_NEWSOME, _REF_BRITTEN, _REF_PILLY, _REF_YELLOTT),
+        method_params=("n_sequences", "dot_life_frames", "gauss_sigma_px", "min_sep_px"),
+        defaults={"dot_life_frames": 0},
+    ),
+    "gaussian_nonoverlap_brownian": MethodSpec(
+        id="gaussian_nonoverlap_brownian",
+        label="Gaussian non-overlapping (Brownian)",
+        short="Ours BM",
+        tab="Ours (Brownian)",
         engine=GaussianNonOverlapRDKEngine,
-        tagline="The Brownian method with a soft aperture and evenly spaced dots.",
+        tagline="The same two modifications on a Brownian base - exact coherence, cheaper "
+        "to enforce.",
         noise_rule="Steps at signal speed in a fresh random direction every frame "
         "(inherited from Brownian).",
         canonical=False,
@@ -563,20 +613,18 @@ METHODS: dict[str, MethodSpec] = {
             "signal dots along the common direction, noise dots stepping the same distance "
             "in fresh random directions.",
             _EXIT_STEP,
-            "Replant any dots that ended the step too close to a neighbour.",
+            "Replant any dots that ended the step too close to a neighbour, sacrificing "
+            "noise dots first so coherent steps survive.",
             "Scale each dot's opacity by a Gaussian in its distance from the field centre, "
             "alpha = exp(-r^2 / 2 sigma^2), so the aperture has no hard edge.",
         ),
         notes=(
             "Motion is identical to the Brownian method, so coherence is directly comparable "
-            "between the two. The modifications are placement and rendering only.",
-            "The Gaussian envelope removes the aperture contour and the abrupt onset and "
-            "offset dots get as they cross a hard edge.",
-            "Even spacing keeps the visible dot count stable and stops apparent contrast "
-            "varying with chance clustering.",
-            "Cost: separation is enforced by teleporting violators, which can displace a "
-            "signal dot mid-trajectory, so effective coherence sits marginally below nominal. "
-            "Prefer plain Brownian when coherence must be exact.",
+            "between the two.",
+            "Dots move a pixel or two per frame rather than teleporting, so the separation "
+            "constraint rarely fires and perturbs the motion less than on the MN base.",
+            "Coherence is an exact count of dots rather than a per-frame Bernoulli draw. "
+            "Prefer this variant when coherence must be exact.",
         ),
         references=(_REF_SCASE, _REF_PILLY, _REF_YELLOTT, _REF_MORGAN),
         method_params=("dot_life_frames", "signal_rule", "gauss_sigma_px", "min_sep_px"),

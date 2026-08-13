@@ -96,12 +96,21 @@ transparent superposition of many directions rather than a signal buried in nois
 lifetime matters more here than anywhere else: it is the only thing that ever re-randomizes
 a noise dot's direction, so a long lifetime makes the noise nearly static in direction.
 
-## Our variant: Gaussian non-overlapping (`gaussian_nonoverlap`)
+## Our variant: Gaussian non-overlapping
 
-Not a new algorithm. It is the **Brownian method above, unchanged**, plus two rendering and
-placement modifications. Every motion rule — signal selection, random-walk noise, limited
-lifetime, uniform respawn — is inherited exactly, so a run at coherence *c* is directly
-comparable to `brownian` at coherence *c*.
+Not a new algorithm. It is a canonical method, **unchanged**, plus two placement and
+rendering modifications. Every motion rule of the base is inherited exactly, so a run at
+coherence *c* is directly comparable to that base at coherence *c*.
+
+The modifications live in a mixin that composes onto any engine, so the repository ships
+two variants:
+
+- **`gaussian_nonoverlap`** (the default) is built on **Movshon–Newsome**, the algorithm
+  the MT and perceptual-decision literature is written in.
+- **`gaussian_nonoverlap_brownian`** is built on **Brownian**. Its coherence is an exact
+  count rather than a per-frame Bernoulli draw, and because its dots move a pixel or two
+  per frame instead of teleporting, the separation constraint almost never fires. Prefer it
+  when coherence must be exact.
 
 **Modification 1 — Gaussian envelope.** Per-dot opacity falls off with distance from the
 field centre, `alpha = exp(−r² / 2σ²)`, with σ defaulting to a quarter of the field
@@ -121,13 +130,22 @@ photoreceptor sampling — so density is even, no dot is ever hidden behind anot
 apparent contrast does not vary with local clustering.
 
 **Known cost of modification 2.** The constraint is enforced by teleportation, not by
-collision physics. When a moving dot ends a step too close to a neighbour it is replanted
-elsewhere in the aperture, and that can happen to a *signal* dot mid-trajectory. At the
-densities this is designed for the event is rare, but it does perturb the motion signal, so
-effective coherence is very slightly below nominal. Prefer the plain `brownian` method when
-you need coherence to be exact; use this one when even spacing and a soft aperture matter
-more, as they usually do for figures, demos, and stimuli where visible dot count must be
-stable.
+collision physics. When a moving dot ends a step too close to a neighbour, one of the two is
+replanted elsewhere in the aperture — and replanting a *signal* dot mid-trajectory perturbs
+the motion. On the Movshon–Newsome base this matters more than it looks, because one
+coherent displacement there stands in for three frames of signal rather than one.
+
+Violation resolution therefore chooses its victim rather than moving every dot in conflict:
+noise dots are sacrificed first, and a signal dot is only replanted when its conflict cannot
+be cleared any other way. A final pass moves everything still in conflict, which always
+resolves, so the separation guarantee holds regardless. Measured on a deliberately crowded
+field (700 dots, 4 px separation, 300 px aperture), naively replanting every violator
+corrupts roughly 5% of coherent displacements; preferring noise dots brings that to zero,
+and the repository tests hold it under 1%.
+
+Use `gaussian_nonoverlap_brownian` if you want the modifications with the least
+interference of all: its dots step rather than teleport, so conflicts are rarer to begin
+with, and its coherence is an exact dot count.
 
 ## What happened to luminance balancing
 
@@ -158,9 +176,12 @@ luminances are `background ± dot_contrast/2`, clipped to the displayable range.
 | Speed-matched noise, the common psychophysics default | `brownian` |
 | Maximum noise displacement, lowest thresholds | `white_noise` |
 | Transparent-motion appearance, direction-defined noise | `random_direction` |
-| Even spacing and a soft aperture, for figures and demos | `gaussian_nonoverlap` |
+| Even spacing and a soft aperture on the classic paradigm | `gaussian_nonoverlap` |
+| The same, with exact coherence and minimal interference | `gaussian_nonoverlap_brownian` |
 
-Coherence values are **not** interchangeable across rows of that table.
+Coherence values are **not** interchangeable across rows of that table, with one exception:
+each of our variants is directly comparable to the canonical method it is built on, because
+it inherits that method's motion untouched.
 
 ## References
 

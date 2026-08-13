@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import os
 import uuid
@@ -7,6 +8,7 @@ from dataclasses import fields as dataclass_fields
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 from flask import (
     Flask,
     Response,
@@ -19,7 +21,7 @@ from flask import (
     url_for,
 )
 
-from ..export import write_frames_zip, write_mp4
+from ..export import simulate, write_frames_zip, write_mp4
 from ..methods import DEFAULT_METHOD, FIELDS, GROUP_LABELS, GROUP_ORDER, get_method, methods_payload
 from ..params import RDKParams, RenderParams
 
@@ -28,6 +30,15 @@ _RENDER_FIELDS = {f.name for f in dataclass_fields(RenderParams)}
 
 # Parameters where a non-positive value means "derive a sensible default".
 _AUTO_WHEN_ZERO = ("gauss_sigma_px", "min_sep_px")
+
+# The live preview streams raw dot positions, so its cost scales with frames x dots.
+# Long clips are truncated for the preview only; exports always use the full duration.
+PREVIEW_MAX_FRAMES = 150
+
+
+def _pack(array) -> str:
+    """Encode an array as little-endian float32 base64, for the browser to decode."""
+    return base64.b64encode(np.ascontiguousarray(array, dtype="<f4").tobytes()).decode("ascii")
 
 
 def _coerce(name: str, raw: str | None) -> Any:
@@ -159,6 +170,38 @@ def create_app(*, instance_path: str | None = None) -> Flask:
     @app.get("/api/methods")
     def api_methods() -> Response:
         return jsonify(methods_payload())
+
+    @app.post("/api/preview")
+    def api_preview() -> Response:
+        """Simulate the current parameters and hand the browser raw dot positions.
+
+        Deliberately does not touch disk or the session: this fires on every parameter
+        change, and only the explicit export writes files.
+        """
+        rdk, render, _ = parse_form(request.form)
+        sim = simulate(rdk, render, max_frames=PREVIEW_MAX_FRAMES)
+        spec = get_method(rdk.method)
+
+        return jsonify(
+            {
+                "method": spec.id,
+                "label": spec.label,
+                "n_frames": sim["n_frames"],
+                "total_frames": sim["total_frames"],
+                "truncated": sim["truncated"],
+                "n_dots": sim["n_dots"],
+                "fps": render.fps,
+                "width": render.width_px,
+                "height": render.height_px,
+                "background": render.background_lum,
+                "dot_size": rdk.dot_size_px,
+                "field_diam": rdk.field_diam_px,
+                "center": list(rdk.field_center_xy_px),
+                "xy": _pack(sim["xy"]),
+                "alpha": _pack(sim["alpha"]),
+                "lum": _pack(sim["dot_lum"]),
+            }
+        )
 
     @app.post("/generate")
     def generate() -> Response:

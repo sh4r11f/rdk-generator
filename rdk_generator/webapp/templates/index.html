@@ -3,229 +3,250 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>RDK Generator</title>
+    <title>RDK Studio</title>
     <style>
       *, *::before, *::after { box-sizing: border-box; }
 
       :root {
-        --bg: #070b14;
-        --panel: rgba(255, 255, 255, 0.035);
-        --panel-solid: #0e1421;
-        --text: #e8edf7;
-        --muted: #93a1bb;
-        --faint: #64748b;
-        --border: rgba(255, 255, 255, 0.09);
-        --border-strong: rgba(255, 255, 255, 0.16);
-        --accent: #5eafff;
-        --accent-dim: rgba(94, 175, 255, 0.16);
+        --bg: #05070d;
+        --panel: rgba(255, 255, 255, 0.032);
+        --panel-hi: rgba(255, 255, 255, 0.06);
+        --text: #e9eef8;
+        --muted: #96a3bd;
+        --faint: #5f6d86;
+        --border: rgba(255, 255, 255, 0.085);
+        --border-hi: rgba(255, 255, 255, 0.18);
+        --accent: #56b6ff;
+        --accent-soft: rgba(86, 182, 255, 0.14);
         --ours: #fbbf24;
-        --radius: 14px;
+        --ok: #34d399;
+        --warn: #fbbf24;
+        --bad: #f87171;
+        --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
       }
 
       body {
         margin: 0;
         font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
         background:
-          radial-gradient(1100px 520px at 12% -8%, rgba(94, 175, 255, 0.16), transparent 60%),
-          radial-gradient(900px 500px at 92% 4%, rgba(251, 191, 36, 0.07), transparent 55%),
+          radial-gradient(1200px 560px at 8% -10%, rgba(86, 182, 255, 0.15), transparent 60%),
+          radial-gradient(1000px 520px at 96% -4%, rgba(251, 191, 36, 0.06), transparent 55%),
           var(--bg);
+        background-attachment: fixed;
         color: var(--text);
         line-height: 1.5;
         -webkit-font-smoothing: antialiased;
       }
 
-      .container { max-width: 1240px; margin: 0 auto; padding: 32px 20px 56px; }
-
-      header { margin-bottom: 26px; }
-      h1 { font-size: 24px; margin: 0 0 4px; letter-spacing: -0.01em; font-weight: 620; }
-      .subtitle { color: var(--muted); font-size: 13.5px; }
-      .subtitle code {
-        font-size: 12.5px; background: rgba(255,255,255,0.06);
-        padding: 1px 6px; border-radius: 5px; color: var(--text);
+      /* ---------- menu bar ---------- */
+      .appbar {
+        position: sticky; top: 0; z-index: 40;
+        display: flex; align-items: center; gap: 18px;
+        padding: 0 20px; height: 56px;
+        background: rgba(6, 9, 16, 0.82);
+        backdrop-filter: saturate(160%) blur(14px);
+        border-bottom: 1px solid var(--border);
       }
+      .brand { display: flex; align-items: center; gap: 9px; flex: none; }
+      .brand .mark {
+        width: 22px; height: 22px; border-radius: 7px; flex: none;
+        background: conic-gradient(from 210deg, var(--accent), #a78bfa, var(--ours), var(--accent));
+        box-shadow: 0 0 16px rgba(86, 182, 255, 0.4);
+      }
+      .brand b { font-size: 14.5px; font-weight: 640; letter-spacing: -0.01em; }
+
+      .tabs {
+        display: flex; align-items: center; gap: 3px; flex: 1 1 auto;
+        overflow-x: auto; scrollbar-width: none; padding: 3px;
+      }
+      .tabs::-webkit-scrollbar { display: none; }
+      .tab {
+        display: inline-flex; align-items: center; gap: 7px; flex: none;
+        font: inherit; font-size: 12.5px; color: var(--muted);
+        padding: 7px 12px; border-radius: 9px; border: 1px solid transparent;
+        background: transparent; cursor: pointer; white-space: nowrap;
+        transition: color .14s, background .14s, border-color .14s;
+      }
+      .tab:hover { color: var(--text); background: var(--panel-hi); }
+      .tab[aria-selected="true"] {
+        color: var(--text); background: var(--accent-soft);
+        border-color: rgba(86, 182, 255, 0.42);
+      }
+      .tab .chip {
+        font-family: var(--mono); font-size: 9.5px; font-weight: 700; letter-spacing: .04em;
+        padding: 2px 5px; border-radius: 5px;
+        background: rgba(86, 182, 255, 0.16); color: #a9d6ff;
+      }
+      .tab.is-ours .chip { background: rgba(251, 191, 36, 0.16); color: #fcd34d; }
+
+      .bar-right { display: flex; align-items: center; gap: 10px; flex: none; }
+      .pill {
+        display: inline-flex; align-items: center; gap: 6px;
+        font-size: 11.5px; color: var(--muted); padding: 5px 10px;
+        border: 1px solid var(--border); border-radius: 999px; background: var(--panel);
+      }
+      .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); flex: none; }
+      .pill[data-state="busy"] .dot { background: var(--warn); animation: pulse 1s ease-in-out infinite; }
+      .pill[data-state="error"] .dot { background: var(--bad); }
+      @keyframes pulse { 50% { opacity: .25; } }
+
+      .icon-btn {
+        display: inline-grid; place-content: center; width: 30px; height: 30px;
+        font: inherit; font-size: 13px; color: var(--muted); cursor: pointer;
+        border: 1px solid var(--border); border-radius: 8px; background: var(--panel);
+        transition: color .14s, border-color .14s;
+      }
+      .icon-btn:hover { color: var(--text); border-color: var(--border-hi); }
+
+      /* ---------- layout ---------- */
+      .wrap { max-width: 1320px; margin: 0 auto; padding: 20px 20px 60px; }
+      .grid { display: grid; grid-template-columns: minmax(0, 384px) minmax(0, 1fr); gap: 18px; align-items: start; }
+      @media (max-width: 1040px) { .grid { grid-template-columns: 1fr; } }
 
       .card {
-        background: var(--panel);
-        border: 1px solid var(--border);
-        border-radius: var(--radius);
-        padding: 18px;
+        background: var(--panel); border: 1px solid var(--border);
+        border-radius: 15px; padding: 17px;
       }
+      .stack { display: grid; gap: 18px; position: sticky; top: 74px; }
+      @media (max-width: 1040px) { .stack { position: static; } }
 
       .section-title {
-        font-size: 11px; text-transform: uppercase; letter-spacing: 0.09em;
-        color: var(--faint); font-weight: 650; margin: 0 0 12px;
+        font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.1em;
+        color: var(--faint); font-weight: 660; margin: 0 0 11px;
       }
 
-      /* ---- method picker ---- */
-      .methods {
-        display: grid; gap: 10px; margin-bottom: 18px;
-        grid-template-columns: repeat(auto-fit, minmax(196px, 1fr));
+      /* ---------- stage ---------- */
+      .stage {
+        display: grid; place-items: center; padding: 22px; border-radius: 12px;
+        background: radial-gradient(circle at 50% 45%, rgba(255,255,255,0.045), transparent 70%), #04060b;
+        border: 1px solid var(--border); min-height: 300px;
       }
-      .method {
-        text-align: left; cursor: pointer; font: inherit; color: inherit;
-        background: var(--panel); border: 1px solid var(--border);
-        border-radius: 12px; padding: 13px 14px; transition: border-color .15s, background .15s, transform .1s;
-        display: flex; flex-direction: column; gap: 5px; min-width: 0;
+      canvas {
+        display: block; max-width: 100%; border-radius: 8px;
+        image-rendering: pixelated;      /* never smear the stimulus when scaled up */
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
       }
-      .method:hover { border-color: var(--border-strong); background: rgba(255,255,255,0.055); }
-      .method:active { transform: translateY(1px); }
-      .method[aria-pressed="true"] {
-        border-color: rgba(94, 175, 255, 0.65);
-        background: var(--accent-dim);
-        box-shadow: 0 0 0 3px rgba(94, 175, 255, 0.1);
-      }
-      .method-top { display: flex; align-items: center; gap: 8px; }
-      .badge {
-        font-size: 10.5px; font-weight: 700; letter-spacing: 0.04em;
-        padding: 2px 7px; border-radius: 999px; flex: none;
-        background: rgba(94,175,255,0.18); color: #b3d9ff; border: 1px solid rgba(94,175,255,0.3);
-      }
-      .badge.ours {
-        background: rgba(251,191,36,0.15); color: #fcd34d; border-color: rgba(251,191,36,0.32);
-      }
-      .method-name { font-size: 13.5px; font-weight: 580; min-width: 0; }
-      .method-tag { font-size: 11.5px; color: var(--muted); line-height: 1.4; }
+      .stage .idle { color: var(--faint); font-size: 13px; }
 
-      /* ---- layout ---- */
-      .grid { display: grid; grid-template-columns: minmax(0, 420px) minmax(0, 1fr); gap: 18px; align-items: start; }
-      @media (max-width: 1000px) { .grid { grid-template-columns: 1fr; } }
-
-      .right { display: grid; gap: 18px; position: sticky; top: 20px; }
-      @media (max-width: 1000px) { .right { position: static; } }
-
-      /* ---- form ---- */
-      fieldset { border: 0; margin: 0 0 20px; padding: 0; }
-      fieldset:last-of-type { margin-bottom: 14px; }
-      .fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start; }
-      .field { display: grid; align-content: start; gap: 5px; min-width: 0; }
-      .field.wide { grid-column: 1 / -1; }
-      .field > span { font-size: 12px; color: var(--muted); font-weight: 500; }
-      .field small { font-size: 11px; color: var(--faint); line-height: 1.4; }
-
-      input[type="number"], select {
-        width: 100%; min-width: 0; padding: 8px 10px; font: inherit; font-size: 13px;
-        color: var(--text); background: rgba(6, 11, 22, 0.66);
-        border: 1px solid var(--border); border-radius: 9px; outline: none;
+      .transport {
+        display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+        margin-top: 13px;
       }
-      select { appearance: none; cursor: pointer; padding-right: 28px;
-        background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%),
-                          linear-gradient(135deg, var(--muted) 50%, transparent 50%);
-        background-position: right 13px top 15px, right 8px top 15px;
-        background-size: 5px 5px, 5px 5px; background-repeat: no-repeat; }
-      input[type="number"]:focus, select:focus {
-        border-color: rgba(94,175,255,0.6); box-shadow: 0 0 0 3px rgba(94,175,255,0.13);
-      }
-      .slider-row { display: grid; grid-template-columns: 1fr 74px; gap: 9px; align-items: center; }
-      input[type="range"] { width: 100%; accent-color: var(--accent); cursor: pointer; }
+      .stats { font-family: var(--mono); font-size: 11.5px; color: var(--faint); }
+      .stats b { color: var(--muted); font-weight: 500; }
+      .grow { flex: 1 1 auto; }
 
-      button.primary {
-        width: 100%; padding: 11px 14px; font: inherit; font-size: 13.5px; font-weight: 580;
-        color: #04121f; background: linear-gradient(180deg, #7cc0ff, #4a9ef0);
-        border: 0; border-radius: 10px; cursor: pointer;
+      button.ghost, button.solid {
+        font: inherit; font-size: 12.5px; cursor: pointer; border-radius: 9px;
+        padding: 8px 13px; transition: filter .14s, border-color .14s, background .14s;
       }
-      button.primary:hover { filter: brightness(1.07); }
-      .meta-line { text-align: center; font-size: 11.5px; color: var(--faint); margin-top: 9px; }
+      button.ghost {
+        color: var(--text); background: var(--panel); border: 1px solid var(--border);
+      }
+      button.ghost:hover { border-color: var(--border-hi); background: var(--panel-hi); }
+      button.solid {
+        color: #04121f; border: 0; font-weight: 600;
+        background: linear-gradient(180deg, #7ec8ff, #3f9ff0);
+      }
+      button.solid:hover { filter: brightness(1.08); }
+      button.solid:disabled { filter: grayscale(.6) brightness(.7); cursor: default; }
 
-      /* ---- preview ---- */
-      /* `width: auto` keeps the video at its rendered pixel size: upscaling a small
-         stimulus would smear the dots and misrepresent what was generated. */
-      video {
-        display: block; margin: 0 auto; width: auto; max-width: 100%; max-height: 560px;
-        border-radius: 11px; border: 1px solid var(--border); background: #05080f;
-      }
-      .placeholder {
-        min-height: 280px; display: grid; place-content: center; gap: 6px; text-align: center;
-        border: 1px dashed var(--border-strong); border-radius: 11px;
-        color: var(--faint); font-size: 13px; background: rgba(5, 8, 15, 0.45);
+      .note {
+        margin-top: 10px; font-size: 11.5px; color: var(--warn);
+        background: rgba(251, 191, 36, 0.08); border-left: 2px solid rgba(251, 191, 36, 0.5);
+        border-radius: 0 6px 6px 0; padding: 7px 10px;
       }
       .links { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
       .links a {
         font-size: 12px; color: var(--text); text-decoration: none; padding: 7px 11px;
-        border: 1px solid var(--border); border-radius: 9px; background: rgba(255,255,255,0.03);
+        border: 1px solid var(--border); border-radius: 9px; background: var(--panel);
       }
-      .links a:hover { border-color: rgba(94,175,255,0.5); }
-      .preview-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
-      .preview-head .who { font-size: 11.5px; color: var(--muted); }
+      .links a:hover { border-color: rgba(86, 182, 255, 0.5); }
 
-      /* ---- docs ---- */
-      .doc-title { font-size: 16px; font-weight: 600; margin: 0 0 4px; }
+      /* ---------- form ---------- */
+      fieldset { border: 0; margin: 0 0 18px; padding: 0; }
+      .fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start; }
+      .field { display: grid; align-content: start; gap: 5px; min-width: 0; }
+      .field.wide { grid-column: 1 / -1; }
+      .field > span { font-size: 12px; color: var(--muted); font-weight: 500; }
+      .field small { font-size: 10.8px; color: var(--faint); line-height: 1.42; }
+
+      input[type="number"], select {
+        width: 100%; min-width: 0; padding: 8px 10px; font: inherit; font-size: 13px;
+        font-variant-numeric: tabular-nums; color: var(--text);
+        background: rgba(4, 7, 13, 0.7); border: 1px solid var(--border);
+        border-radius: 9px; outline: none; transition: border-color .14s, box-shadow .14s;
+      }
+      select { appearance: none; cursor: pointer; padding-right: 26px;
+        background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+                          linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+        background-position: right 12px top 15px, right 7px top 15px;
+        background-size: 5px 5px, 5px 5px; background-repeat: no-repeat; }
+      input[type="number"]:focus, select:focus {
+        border-color: rgba(86, 182, 255, 0.6); box-shadow: 0 0 0 3px rgba(86, 182, 255, 0.12);
+      }
+      .slider-row { display: grid; grid-template-columns: 1fr 66px; gap: 9px; align-items: center; }
+      input[type="range"] { width: 100%; accent-color: var(--accent); cursor: pointer; }
+
+      /* ---------- docs ---------- */
+      .doc-title { font-size: 16.5px; font-weight: 620; margin: 0 0 3px; letter-spacing: -0.01em; }
       .doc-tagline { color: var(--muted); font-size: 13px; margin: 0 0 14px; }
       .callout {
-        font-size: 12.5px; color: var(--muted); background: rgba(94,175,255,0.07);
-        border-left: 2px solid rgba(94,175,255,0.5); border-radius: 0 7px 7px 0;
+        font-size: 12.5px; color: var(--muted); background: rgba(86, 182, 255, 0.07);
+        border-left: 2px solid rgba(86, 182, 255, 0.5); border-radius: 0 7px 7px 0;
         padding: 9px 12px; margin: 0 0 16px;
       }
       .callout b { color: var(--text); font-weight: 580; }
       .doc h4 {
-        font-size: 11px; text-transform: uppercase; letter-spacing: 0.09em;
-        color: var(--faint); font-weight: 650; margin: 18px 0 9px;
+        font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.1em;
+        color: var(--faint); font-weight: 660; margin: 18px 0 9px;
       }
-      .doc ol, .doc ul { margin: 0; padding-left: 20px; }
-      .doc li { font-size: 13px; color: var(--muted); margin-bottom: 7px; line-height: 1.55; }
-      .doc ol li::marker { color: var(--accent); font-weight: 600; }
+      .doc ol, .doc ul { margin: 0; padding-left: 19px; }
+      .doc li { font-size: 12.8px; color: var(--muted); margin-bottom: 7px; line-height: 1.55; }
+      .doc ol li::marker { color: var(--accent); font-weight: 640; }
       .refs { list-style: none; padding: 0; }
-      .refs li { margin-bottom: 9px; font-size: 12px; line-height: 1.5; }
+      .refs li { margin-bottom: 9px; font-size: 11.8px; line-height: 1.5; }
       .refs a { color: var(--accent); text-decoration: none; }
       .refs a:hover { text-decoration: underline; }
-
-      /* ---- busy overlay ---- */
-      .overlay {
-        position: fixed; inset: 0; display: none; place-content: center; justify-items: center;
-        gap: 14px; background: rgba(7, 11, 20, 0.86); backdrop-filter: blur(3px); z-index: 50;
-      }
-      .overlay.on { display: grid; }
-      .spinner {
-        width: 34px; height: 34px; border-radius: 50%;
-        border: 3px solid rgba(255,255,255,0.14); border-top-color: var(--accent);
-        animation: spin .8s linear infinite;
-      }
-      @keyframes spin { to { transform: rotate(360deg); } }
-      .overlay p { margin: 0; color: var(--muted); font-size: 13px; }
     </style>
   </head>
   <body>
-    <div class="container">
-      <header>
-        <h1>RDK Generator</h1>
-        <div class="subtitle">
-          Four canonical random-dot-kinematogram algorithms plus a Gaussian non-overlapping
-          variant &middot; MP4 and frame export &middot; see <code>docs/methods.md</code>
-        </div>
-      </header>
+    <nav class="appbar">
+      <div class="brand"><span class="mark"></span><b>RDK Studio</b></div>
+      <div class="tabs" id="tabs" role="tablist" aria-label="RDK method"></div>
+      <div class="bar-right">
+        <span class="pill" id="status" data-state="busy"><span class="dot"></span><span id="status-text">starting</span></span>
+        <button class="icon-btn" id="shuffle" type="button" title="Random seed">&#8635;</button>
+      </div>
+    </nav>
 
-      <p class="section-title">Method</p>
-      <div class="methods" id="methods" role="group" aria-label="RDK method"></div>
-
+    <div class="wrap">
       <div class="grid">
         <form class="card" method="post" action="/generate" id="form">
           <input type="hidden" name="method" id="method-input" value="{{ selected }}" />
           <div id="fields"></div>
-          <button class="primary" type="submit">Generate preview</button>
-          <div class="meta-line" id="frame-count"></div>
+          <button class="solid" type="submit" style="width:100%">Export .mp4 + frames</button>
         </form>
 
-        <div class="right">
+        <div class="stack">
           <section class="card">
-            <div class="preview-head">
-              <p class="section-title" style="margin-bottom:12px">Preview</p>
-              {% if mp4_url and preview_method %}
-                <span class="who">{{ preview_method }}</span>
-              {% endif %}
+            <p class="section-title">Live preview</p>
+            <div class="stage" id="stage">
+              <canvas id="canvas" width="512" height="512"></canvas>
             </div>
+            <div class="transport">
+              <button class="ghost" id="play" type="button">Pause</button>
+              <span class="stats" id="stats"></span>
+              <span class="grow"></span>
+            </div>
+            <div class="note" id="trunc" hidden></div>
+
             {% if mp4_url %}
-              <video controls autoplay loop muted playsinline>
-                <source src="{{ mp4_url }}" type="video/mp4" />
-                Your browser does not support the video tag.
-              </video>
               <div class="links">
                 <a href="{{ mp4_url }}">Download .mp4</a>
                 <a href="{{ zip_url }}">Frames (.zip)</a>
                 <a href="/meta/{{ job_id }}">Params (.json)</a>
-              </div>
-            {% else %}
-              <div class="placeholder">
-                <div>No preview yet</div>
-                <div style="font-size:12px">Pick a method, set parameters, then generate.</div>
+                {% if preview_method %}<span class="pill">last export: {{ preview_method }}</span>{% endif %}
               </div>
             {% endif %}
           </section>
@@ -233,11 +254,6 @@
           <section class="card doc" id="doc"></section>
         </div>
       </div>
-    </div>
-
-    <div class="overlay" id="overlay">
-      <div class="spinner"></div>
-      <p>Rendering frames&hellip; this blocks until the video is written.</p>
     </div>
 
     <script>
@@ -249,149 +265,248 @@
       const byId = Object.fromEntries(METHODS.map((m) => [m.id, m]));
       let currentId = byId[{{ selected|tojson }}] ? {{ selected|tojson }} : METHODS[0].id;
 
+      const form = document.getElementById("form");
+      const canvas = document.getElementById("canvas");
+      const ctx = canvas.getContext("2d", { alpha: false });
+
       const esc = (s) =>
         String(s).replace(/[&<>"']/g, (c) =>
           ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]
         );
 
+      /* ---------------- form ---------------- */
+
       function valueFor(method, param) {
         const saved = SAVED[method.id];
-        if (saved && Object.prototype.hasOwnProperty.call(saved, param.name)) {
-          return saved[param.name];
-        }
+        if (saved && Object.prototype.hasOwnProperty.call(saved, param.name)) return saved[param.name];
         return param.default;
       }
 
-      function attrs(param) {
+      function attrs(p) {
         const bits = [];
-        if (param.min !== null) bits.push(`min="${param.min}"`);
-        if (param.max !== null) bits.push(`max="${param.max}"`);
-        if (param.step !== null) bits.push(`step="${param.step}"`);
+        if (p.min !== null) bits.push(`min="${p.min}"`);
+        if (p.max !== null) bits.push(`max="${p.max}"`);
+        if (p.step !== null) bits.push(`step="${p.step}"`);
         return bits.join(" ");
       }
 
-      function fieldHtml(method, param) {
-        const value = valueFor(method, param);
-        const help = param.help ? `<small>${esc(param.help)}</small>` : "";
-        // Only dropdowns span both columns; widening by help-text length made the
-        // two-column grid look ragged.
-        const wide = param.kind === "choice";
+      function fieldHtml(method, p) {
+        const value = valueFor(method, p);
+        const help = p.help ? `<small>${esc(p.help)}</small>` : "";
         let control;
 
-        if (param.kind === "choice") {
-          const opts = param.choices
-            .map(
-              (c) =>
-                `<option value="${esc(c.value)}"${c.value === value ? " selected" : ""}>` +
-                `${esc(c.label)}</option>`
-            )
+        if (p.kind === "choice") {
+          const opts = p.choices
+            .map((c) => `<option value="${esc(c.value)}"${c.value === value ? " selected" : ""}>${esc(c.label)}</option>`)
             .join("");
-          control = `<select name="${param.name}">${opts}</select>`;
-        } else if (param.kind === "float" && param.min !== null && param.max !== null) {
-          // Bounded floats get a slider paired with the number box.
+          control = `<select name="${p.name}">${opts}</select>`;
+        } else if (p.kind === "float" && p.min !== null && p.max !== null) {
           control =
             `<div class="slider-row">` +
-            `<input type="range" ${attrs(param)} value="${esc(value)}" data-sync="${param.name}" />` +
-            `<input type="number" name="${param.name}" ${attrs(param)} value="${esc(value)}" />` +
-            `</div>`;
+            `<input type="range" ${attrs(p)} value="${esc(value)}" data-sync="${p.name}" />` +
+            `<input type="number" name="${p.name}" ${attrs(p)} value="${esc(value)}" /></div>`;
         } else {
-          control = `<input type="number" name="${param.name}" ${attrs(param)} value="${esc(value)}" />`;
+          control = `<input type="number" name="${p.name}" ${attrs(p)} value="${esc(value)}" />`;
         }
-
-        return (
-          `<label class="field${wide ? " wide" : ""}">` +
-          `<span>${esc(param.label)}</span>${control}${help}</label>`
-        );
+        return `<label class="field${p.kind === "choice" ? " wide" : ""}"><span>${esc(p.label)}</span>${control}${help}</label>`;
       }
 
-      function renderMethods() {
-        document.getElementById("methods").innerHTML = METHODS.map(
+      function renderTabs() {
+        document.getElementById("tabs").innerHTML = METHODS.map(
           (m) =>
-            `<button type="button" class="method" data-id="${m.id}" ` +
-            `aria-pressed="${m.id === currentId}">` +
-            `<span class="method-top">` +
-            `<span class="badge${m.canonical ? "" : " ours"}">${esc(m.short)}</span>` +
-            `<span class="method-name">${esc(m.label)}</span></span>` +
-            `<span class="method-tag">${esc(m.tagline)}</span></button>`
+            `<button type="button" role="tab" class="tab${m.canonical ? "" : " is-ours"}" ` +
+            `data-id="${m.id}" aria-selected="${m.id === currentId}" title="${esc(m.tagline)}">` +
+            `<span class="chip">${esc(m.short)}</span>${esc(m.tab)}</button>`
         ).join("");
       }
 
       function renderFields() {
         const method = byId[currentId];
-        const html = GROUP_ORDER.map((group) => {
-          const params = method.params.filter((p) => p.group === group);
+        document.getElementById("fields").innerHTML = GROUP_ORDER.map((g) => {
+          const params = method.params.filter((p) => p.group === g);
           if (!params.length) return "";
           return (
-            `<fieldset><p class="section-title">${esc(GROUP_LABELS[group])}</p>` +
-            `<div class="fields">${params.map((p) => fieldHtml(method, p)).join("")}</div>` +
-            `</fieldset>`
+            `<fieldset><p class="section-title">${esc(GROUP_LABELS[g])}</p>` +
+            `<div class="fields">${params.map((p) => fieldHtml(method, p)).join("")}</div></fieldset>`
           );
         }).join("");
-        document.getElementById("fields").innerHTML = html;
         document.getElementById("method-input").value = currentId;
-        wireSliders();
-        updateFrameCount();
+
+        document.querySelectorAll("input[data-sync]").forEach((range) => {
+          const number = range.parentElement.querySelector('input[type="number"]');
+          range.addEventListener("input", () => { number.value = range.value; schedule(); });
+          number.addEventListener("input", () => { range.value = number.value; });
+        });
       }
 
       function renderDoc() {
         const m = byId[currentId];
-        const steps = m.steps.map((s) => `<li>${esc(s)}</li>`).join("");
-        const notes = m.notes.map((s) => `<li>${esc(s)}</li>`).join("");
+        const li = (xs) => xs.map((s) => `<li>${esc(s)}</li>`).join("");
         const refs = m.references
-          .map(
-            (r) =>
-              `<li><a href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">` +
-              `${esc(r.citation)}</a></li>`
-          )
+          .map((r) => `<li><a href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">${esc(r.citation)}</a></li>`)
           .join("");
         document.getElementById("doc").innerHTML =
           `<h3 class="doc-title">${esc(m.label)}</h3>` +
           `<p class="doc-tagline">${esc(m.tagline)}</p>` +
           `<p class="callout"><b>Noise rule.</b> ${esc(m.noise_rule)}</p>` +
-          `<h4>How each frame is generated</h4><ol>${steps}</ol>` +
-          (notes ? `<h4>Notes</h4><ul>${notes}</ul>` : "") +
+          `<h4>How each frame is generated</h4><ol>${li(m.steps)}</ol>` +
+          (m.notes.length ? `<h4>Notes</h4><ul>${li(m.notes)}</ul>` : "") +
           (refs ? `<h4>References</h4><ul class="refs">${refs}</ul>` : "");
       }
 
-      function wireSliders() {
-        document.querySelectorAll('input[data-sync]').forEach((range) => {
-          const number = range.parentElement.querySelector('input[type="number"]');
-          range.addEventListener("input", () => (number.value = range.value));
-          number.addEventListener("input", () => (range.value = number.value));
-        });
+      /* ---------------- live preview ---------------- */
+
+      let clip = null;
+      let frameIdx = 0;
+      let playing = true;
+      let dirty = false;
+      let timer = null;
+      let inflight = null;
+
+      function setStatus(state, text) {
+        const pill = document.getElementById("status");
+        pill.dataset.state = state;
+        document.getElementById("status-text").textContent = text;
       }
 
-      function updateFrameCount() {
-        const form = document.getElementById("form");
-        const fps = Number(form.elements.fps?.value);
-        const duration = Number(form.elements.duration_s?.value);
-        const target = document.getElementById("frame-count");
-        target.textContent =
-          fps > 0 && duration > 0
-            ? `${Math.max(1, Math.round(fps * duration))} frames at ${fps} fps`
-            : "";
+      function decodeF32(b64) {
+        const bin = atob(b64);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        return new Float32Array(bytes.buffer);
       }
+
+      function schedule(delay = 220) {
+        setStatus("busy", "updating");
+        clearTimeout(timer);
+        timer = setTimeout(fetchPreview, delay);
+      }
+
+      async function fetchPreview() {
+        if (inflight) inflight.abort();
+        inflight = new AbortController();
+        try {
+          const res = await fetch("/api/preview", {
+            method: "POST",
+            body: new FormData(form),
+            signal: inflight.signal,
+          });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const d = await res.json();
+
+          clip = {
+            frames: d.n_frames, dots: d.n_dots, fps: d.fps,
+            w: d.width, h: d.height, bg: d.background,
+            radius: Math.max(0.5, d.dot_size / 2),
+            cx: d.center[0], cy: d.center[1],
+            xy: decodeF32(d.xy), alpha: decodeF32(d.alpha), lum: decodeF32(d.lum),
+          };
+          canvas.width = d.width;
+          canvas.height = d.height;
+          frameIdx = 0;
+          dirty = true;
+
+          document.getElementById("stats").innerHTML =
+            `<b>${d.n_frames}</b> frames &middot; <b>${d.fps}</b> fps &middot; <b>${d.n_dots}</b> dots`;
+          const note = document.getElementById("trunc");
+          note.hidden = !d.truncated;
+          if (d.truncated) {
+            note.textContent =
+              `Preview shows the first ${d.n_frames} of ${d.total_frames} frames. ` +
+              `Exports always use the full duration.`;
+          }
+          setStatus("ok", "live");
+        } catch (err) {
+          if (err.name === "AbortError") return;   // superseded by a newer request
+          setStatus("error", "preview failed");
+        }
+      }
+
+      const shade = (v) => {
+        const n = Math.max(0, Math.min(255, Math.round(v * 255)));
+        return `rgb(${n},${n},${n})`;
+      };
+
+      function drawFrame(i) {
+        const c = clip;
+        ctx.fillStyle = shade(c.bg);
+        ctx.fillRect(0, 0, c.w, c.h);
+
+        // Mirrors FrameRenderer: field-centred, y-up coordinates into pixel space.
+        const ox = c.w / 2 + c.cx;
+        const oy = c.h / 2 - c.cy;
+        const base = i * c.dots * 2;
+        const baseA = i * c.dots;
+
+        for (let d = 0; d < c.dots; d++) {
+          const a = c.alpha[baseA + d];
+          ctx.fillStyle = shade(c.bg * (1 - a) + c.lum[d] * a);
+          ctx.beginPath();
+          ctx.arc(ox + c.xy[base + d * 2], oy - c.xy[base + d * 2 + 1], c.radius, 0, 6.283185307);
+          ctx.fill();
+        }
+      }
+
+      let last = 0;
+      let acc = 0;
+      function loop(ts) {
+        if (clip) {
+          if (playing) {
+            if (last) {
+              acc += ts - last;
+              const spf = 1000 / clip.fps;
+              while (acc >= spf) {
+                acc -= spf;
+                frameIdx = (frameIdx + 1) % clip.frames;
+                dirty = true;
+              }
+            }
+            last = ts;
+          } else {
+            last = 0;
+          }
+          if (dirty) { drawFrame(frameIdx); dirty = false; }
+        }
+        requestAnimationFrame(loop);
+      }
+
+      /* ---------------- wiring ---------------- */
 
       function select(id) {
         if (!byId[id] || id === currentId) return;
         currentId = id;
-        renderMethods();
+        renderTabs();
         renderFields();
         renderDoc();
+        schedule(0);
       }
 
-      document.getElementById("methods").addEventListener("click", (e) => {
-        const button = e.target.closest(".method");
-        if (button) select(button.dataset.id);
-      });
-      document.getElementById("form").addEventListener("input", updateFrameCount);
-      document.getElementById("form").addEventListener("submit", () => {
-        document.getElementById("overlay").classList.add("on");
+      document.getElementById("tabs").addEventListener("click", (e) => {
+        const tab = e.target.closest(".tab");
+        if (tab) select(tab.dataset.id);
       });
 
-      renderMethods();
+      // Any parameter edit re-simulates; no need to press anything.
+      form.addEventListener("input", (e) => {
+        if (e.target.type !== "range") schedule();
+      });
+      form.addEventListener("change", () => schedule());
+
+      document.getElementById("play").addEventListener("click", (e) => {
+        playing = !playing;
+        e.target.textContent = playing ? "Pause" : "Play";
+      });
+
+      document.getElementById("shuffle").addEventListener("click", () => {
+        const seed = form.elements.seed;
+        if (seed) { seed.value = Math.floor(Math.random() * 100000); schedule(0); }
+      });
+
+      renderTabs();
       renderFields();
       renderDoc();
+      requestAnimationFrame(loop);
+      fetchPreview();
     </script>
   </body>
 </html>

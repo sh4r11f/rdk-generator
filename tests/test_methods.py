@@ -15,6 +15,10 @@ from rdk_generator.methods import (
 
 ALL_IDS = sorted(METHODS)
 
+# Our two variants: the same modifications on different canonical bases.
+OUR_IDS = {"gaussian_nonoverlap", "gaussian_nonoverlap_brownian"}
+CANONICAL_IDS = [m for m in ALL_IDS if m not in OUR_IDS]
+
 
 def test_registry_covers_the_documented_methods():
     assert set(METHODS) == {
@@ -23,6 +27,7 @@ def test_registry_covers_the_documented_methods():
         "white_noise",
         "random_direction",
         "gaussian_nonoverlap",
+        "gaussian_nonoverlap_brownian",
     }
     assert DEFAULT_METHOD in METHODS
 
@@ -105,15 +110,15 @@ def test_unknown_method_falls_back_to_the_default():
     assert get_method("").id == DEFAULT_METHOD
 
 
-def test_only_our_variant_is_marked_non_canonical():
-    non_canonical = [m.id for m in METHODS.values() if not m.canonical]
-    assert non_canonical == ["gaussian_nonoverlap"]
+def test_only_our_variants_are_marked_non_canonical():
+    assert {m.id for m in METHODS.values() if not m.canonical} == OUR_IDS
 
 
 def test_list_methods_puts_canonical_ones_first():
     ordered = list_methods()
     assert len(ordered) == len(METHODS)
-    assert ordered[-1].id == "gaussian_nonoverlap"
+    assert {m.id for m in ordered[-2:]} == OUR_IDS
+    assert all(m.canonical for m in ordered[: -len(OUR_IDS)])
 
 
 def test_payload_is_json_serialisable_and_carries_merged_defaults():
@@ -126,12 +131,40 @@ def test_payload_is_json_serialisable_and_carries_merged_defaults():
     assert life["default"] == 0, "payload must carry the per-method override"
 
 
-def test_gaussian_variant_exposes_its_two_modifications():
-    params = set(METHODS["gaussian_nonoverlap"].param_names)
-    assert {"gauss_sigma_px", "min_sep_px"} <= params
+@pytest.mark.parametrize("method_id", sorted(OUR_IDS))
+def test_our_variants_expose_both_modifications(method_id):
+    assert {"gauss_sigma_px", "min_sep_px"} <= set(METHODS[method_id].param_names)
 
 
-@pytest.mark.parametrize("method_id", [m for m in ALL_IDS if m != "gaussian_nonoverlap"])
+def test_our_default_variant_is_built_on_movshon_newsome():
+    from rdk_generator.core import MovshonNewsomeRDKEngine
+
+    assert DEFAULT_METHOD == "gaussian_nonoverlap"
+    engine = build_engine(RDKParams(method="gaussian_nonoverlap"), RenderParams(seed=0))
+    assert isinstance(engine, MovshonNewsomeRDKEngine)
+    # It inherits MN's canonical no-ageing default, and its interleaving.
+    assert engine.dot_life == 0
+    assert engine.n_sequences == 3
+
+
+def test_our_brownian_variant_is_built_on_brownian():
+    from rdk_generator.core import BrownianRDKEngine
+
+    engine = build_engine(RDKParams(method="gaussian_nonoverlap_brownian"), RenderParams(seed=0))
+    assert isinstance(engine, BrownianRDKEngine)
+    assert engine.dot_life == 12
+
+
+@pytest.mark.parametrize("method_id", sorted(OUR_IDS))
+def test_our_variants_apply_the_envelope_and_separation(method_id):
+    engine = build_engine(
+        RDKParams(method=method_id, field_diam_px=200, dot_size_px=4), RenderParams(seed=0)
+    )
+    assert engine.gauss_sigma == pytest.approx(50.0)
+    assert engine.min_sep_px == pytest.approx(4.4)
+
+
+@pytest.mark.parametrize("method_id", CANONICAL_IDS)
 def test_canonical_methods_do_not_expose_our_modifications(method_id):
     params = set(METHODS[method_id].param_names)
     assert not ({"gauss_sigma_px", "min_sep_px"} & params)

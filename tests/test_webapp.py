@@ -1,5 +1,7 @@
+import base64
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from rdk_generator.methods import METHODS
@@ -36,11 +38,12 @@ def client(monkeypatch, tmp_path: Path):
     return test_client
 
 
-def test_index_loads_without_a_preview(client):
+def test_index_loads(client):
     r = client.get("/")
     assert r.status_code == 200
-    assert b"RDK Generator" in r.data
-    assert b"No preview yet" in r.data
+    assert b"RDK Studio" in r.data
+    # The preview is driven client-side from the registry, not server-rendered.
+    assert b"/api/preview" in r.data
 
 
 def test_index_lists_every_method(client):
@@ -173,3 +176,84 @@ def test_parse_form_rejects_invalid_choices():
     rdk, render, _ = _parse(signal_rule="diagonal", luminance_mode="sepia")
     assert rdk.signal_rule == "different"
     assert render.luminance_mode == "uniform"
+
+
+# --- live preview ------------------------------------------------------------
+
+
+def _preview(client, **form):
+    form.setdefault("method", "gaussian_nonoverlap")
+    r = client.post("/api/preview", data=form)
+    assert r.status_code == 200
+    return r.get_json()
+
+
+def _unpack(b64: str) -> np.ndarray:
+    return np.frombuffer(base64.b64decode(b64), dtype="<f4")
+
+
+@pytest.mark.parametrize("method_id", sorted(METHODS))
+def test_preview_works_for_every_method(client, method_id):
+    d = _preview(client, method=method_id, n_dots="60", duration_s="0.2", fps="30")
+    assert d["method"] == method_id
+    assert d["n_frames"] == 6
+    assert d["n_dots"] == 60
+    assert _unpack(d["xy"]).size == 6 * 60 * 2
+    assert _unpack(d["alpha"]).size == 6 * 60
+    assert _unpack(d["lum"]).size == 60
+
+
+def test_preview_positions_stay_inside_the_aperture(client):
+    d = _preview(client, method="brownian", n_dots="80", field_diam_px="200", duration_s="0.5")
+    xy = _unpack(d["xy"]).reshape(d["n_frames"], d["n_dots"], 2)
+    assert np.linalg.norm(xy, axis=2).max() <= 100.0 + 1e-3
+
+
+def test_preview_reports_the_gaussian_envelope(client):
+    ours = _preview(client, method="gaussian_nonoverlap", n_dots="200", field_diam_px="200")
+    plain = _preview(client, method="movshon_newsome", n_dots="200", field_diam_px="200")
+    # Our variant fades dots toward the rim; the canonical base does not.
+    assert _unpack(ours["alpha"]).min() < 0.9
+    assert np.allclose(_unpack(plain["alpha"]), 1.0)
+
+
+def test_preview_truncates_long_clips_but_reports_the_full_length(client):
+    d = _preview(client, method="brownian", duration_s="10", fps="60")
+    assert d["truncated"] is True
+    assert d["n_frames"] < d["total_frames"] == 600
+
+
+def test_short_preview_is_not_marked_truncated(client):
+    d = _preview(client, method="brownian", duration_s="0.5", fps="60")
+    assert d["truncated"] is False
+    assert d["n_frames"] == d["total_frames"] == 30
+
+
+def test_preview_is_deterministic_for_a_given_seed(client):
+    a = _preview(client, method="brownian", seed="42", duration_s="0.3")
+    b = _preview(client, method="brownian", seed="42", duration_s="0.3")
+    assert a["xy"] == b["xy"]
+
+
+def test_preview_writes_nothing_to_disk(client, tmp_path):
+    outputs = tmp_path / "outputs"
+    before = set(outputs.iterdir())
+    _preview(client, method="brownian", duration_s="0.2")
+    assert set(outputs.iterdir()) == before
+
+
+def test_preview_echoes_geometry_the_canvas_needs(client):
+    d = _preview(
+        client,
+        method="brownian",
+        width_px="320",
+        height_px="240",
+        dot_size_px="5",
+        background_lum="0.25",
+        fps="24",
+    )
+    assert (d["width"], d["height"]) == (320, 240)
+    assert d["dot_size"] == 5
+    assert d["background"] == 0.25
+    assert d["fps"] == 24
+    assert d["center"] == [0.0, 0.0]

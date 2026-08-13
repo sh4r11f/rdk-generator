@@ -303,20 +303,17 @@ class MovshonNewsomeRDKEngine(BaseRDKEngine):
         self._handle_exits()
 
 
-class GaussianNonOverlapRDKEngine(BrownianRDKEngine):
-    """The Brownian method plus a Gaussian envelope and a minimum dot separation.
+class GaussianNonOverlapMixin:
+    """Our two modifications: a Gaussian envelope and a minimum dot separation.
 
-    Motion is inherited from `BrownianRDKEngine` unchanged, so coherence stays comparable
-    with that method. The additions are presentational: a soft (Gaussian) aperture instead
-    of a hard-edged one, and blue-noise dot placement so no dot is hidden behind another.
+    Mix in *before* any engine class to apply both without touching its motion rule::
 
-    Separation is enforced by rejection sampling at spawn and by replanting violators after
-    a motion step, which can displace a signal dot mid-trajectory; at the densities this is
-    intended for that is rare, but it does mean effective coherence sits marginally below
-    nominal. See docs/methods.md.
+        class Variant(GaussianNonOverlapMixin, BrownianRDKEngine): ...
+
+    Nothing here depends on how the host engine moves its dots; it only overrides the
+    placement, respawn, and envelope hooks that `BaseRDKEngine` defines. See
+    docs/methods.md for what the modifications are for and what they cost.
     """
-
-    method_id = "gaussian_nonoverlap"
 
     def __init__(
         self,
@@ -365,18 +362,64 @@ class GaussianNonOverlapRDKEngine(BrownianRDKEngine):
         self._on_spawn(mask)
 
     def _resolve_violations(self, max_iters: int = 3) -> None:
-        for _ in range(int(max_iters)):
+        """Replant dots that ended a step too close together.
+
+        Replanting is a teleport, so which dot moves matters: displacing a dot that just
+        carried the signal perturbs the motion. Earlier passes therefore sacrifice noise
+        dots by preference and only move a signal dot when its conflict cannot be cleared
+        otherwise. This matters most for the interleaved method, where one displacement
+        stands in for `n_sequences` frames of signal. The final pass moves every dot still
+        in conflict, which always resolves.
+        """
+        last = int(max_iters) - 1
+        for attempt in range(int(max_iters)):
+            # `_respawn` may relax the separation, so re-read it every pass.
+            sep_sq = self.min_sep_px * self.min_sep_px
             diff = self.xys[:, None, :] - self.xys[None, :, :]
             dist_sq = np.einsum("ijk,ijk->ij", diff, diff)
             np.fill_diagonal(dist_sq, np.inf)
-            violating = np.any(dist_sq < self.min_sep_px * self.min_sep_px, axis=1)
+            conflict = dist_sq < sep_sq
+            violating = np.any(conflict, axis=1)
             if not np.any(violating):
                 return
-            self._respawn(violating)
+
+            if attempt < last:
+                victims = violating & ~self.is_signal
+                staying = ~victims
+                # Anything still conflicting with a dot that stays has to move as well.
+                victims = victims | (
+                    violating & staying & np.any(conflict & staying[None, :], axis=1)
+                )
+            else:
+                victims = violating
+
+            self._respawn(victims)
 
     def step(self) -> None:
         super().step()
         self._resolve_violations()
+
+
+class GaussianNonOverlapMNEngine(GaussianNonOverlapMixin, MovshonNewsomeRDKEngine):
+    """Our variant: the Movshon-Newsome method plus a soft aperture and even dot spacing.
+
+    Motion — three interleaved sequences, per-dot probabilistic coherence, noise dots
+    relocated — is inherited from `MovshonNewsomeRDKEngine` unchanged, so coherence stays
+    comparable with that method.
+    """
+
+    method_id = "gaussian_nonoverlap"
+
+
+class GaussianNonOverlapRDKEngine(GaussianNonOverlapMixin, BrownianRDKEngine):
+    """The same two modifications applied to the Brownian method instead.
+
+    Cheaper to enforce than the interleaved variant (dots move a pixel or two per frame,
+    so the separation constraint rarely fires) and its coherence is an exact count rather
+    than a per-frame Bernoulli draw.
+    """
+
+    method_id = "gaussian_nonoverlap_brownian"
 
 
 class FrameRenderer:

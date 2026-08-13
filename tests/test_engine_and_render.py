@@ -4,6 +4,7 @@ import pytest
 from rdk_generator.core import (
     BrownianRDKEngine,
     FrameRenderer,
+    GaussianNonOverlapMNEngine,
     GaussianNonOverlapRDKEngine,
     MovshonNewsomeRDKEngine,
     RandomDirectionRDKEngine,
@@ -54,17 +55,19 @@ def min_pairwise_distance(xys: np.ndarray) -> float:
     return float(np.min(dist))
 
 
+NON_OVERLAP_ENGINES = [GaussianNonOverlapMNEngine, GaussianNonOverlapRDKEngine]
+
 ALL_ENGINES = [
     BrownianRDKEngine,
     WhiteNoiseRDKEngine,
     RandomDirectionRDKEngine,
     MovshonNewsomeRDKEngine,
-    GaussianNonOverlapRDKEngine,
+    *NON_OVERLAP_ENGINES,
 ]
 
 
 def _extra(cls):
-    return {"min_sep_px": 4.0} if cls is GaussianNonOverlapRDKEngine else {}
+    return {"min_sep_px": 4.0} if cls in NON_OVERLAP_ENGINES else {}
 
 
 # --- shared invariants -------------------------------------------------------
@@ -367,3 +370,88 @@ def test_renderer_flips_y_for_pixel_coordinates():
     )
     lit_rows = np.flatnonzero(frame.max(axis=1) > 0)
     assert lit_rows.max() < 32
+
+
+# --- the modifications compose onto either base ------------------------------
+
+
+@pytest.mark.parametrize("cls", NON_OVERLAP_ENGINES)
+def test_both_variants_respect_min_sep_initially_and_after_steps(cls):
+    engine = build(cls, min_sep_px=4.0, n_dots=150, field_diam_px=200)
+    assert engine.min_sep_px == pytest.approx(4.0), "this density should not need relaxing"
+    assert min_pairwise_distance(engine.xys) >= 3.95
+    for _ in range(5):
+        engine.step()
+        assert min_pairwise_distance(engine.xys) >= 3.95
+
+
+@pytest.mark.parametrize("cls", NON_OVERLAP_ENGINES)
+def test_both_variants_get_the_default_envelope(cls):
+    engine = build(cls, min_sep_px=4.0, field_diam_px=200)
+    assert engine.gauss_sigma == pytest.approx(50.0)
+    assert engine.compute_opacity().min() < 1.0
+
+
+def test_mn_variant_inherits_the_interleaving():
+    engine = build(
+        GaussianNonOverlapMNEngine,
+        min_sep_px=4.0,
+        n_dots=300,
+        coherence=1.0,
+        field_diam_px=WIDE_FIELD,
+    )
+    assert isinstance(engine, MovshonNewsomeRDKEngine)
+    assert engine.n_sequences == 3
+    # Each dot still updates exactly every third frame despite the extra machinery.
+    updated, never_near_rim = [], np.ones(engine.n, dtype=bool)
+    for _ in range(6):
+        moved, interior = step_and_measure(engine)
+        updated.append(moved > 1e-6)
+        never_near_rim &= interior
+    assert set(np.unique(np.array(updated)[:, never_near_rim].sum(axis=0))) == {2}
+
+
+def test_brownian_variant_inherits_exact_count_coherence():
+    engine = build(GaussianNonOverlapRDKEngine, min_sep_px=4.0, n_dots=400, coherence=0.25)
+    assert engine.is_signal.sum() == 100
+
+
+def test_replanting_spares_signal_dots():
+    """A crowded field forces replanting; coherent displacements should survive it."""
+    engine = build(
+        GaussianNonOverlapMNEngine,
+        min_sep_px=4.0,
+        n_dots=700,
+        coherence=1.0,
+        speed_px_per_s=120,
+        field_diam_px=300,
+        dot_life_frames=0,
+    )
+    coherent_step = 120 / 60 * engine.n_sequences
+    lost = total = 0
+    for _ in range(20):
+        before = engine.xys.copy()
+        engine.step()
+        moved = np.linalg.norm(engine.xys - before, axis=1)
+        interior = np.linalg.norm(before, axis=1) < engine.radius - 20
+        signal = engine.is_signal & interior
+        total += int(signal.sum())
+        lost += int((signal & ~np.isclose(moved, coherent_step, atol=1e-2)).sum())
+    assert total > 0
+    # Noise dots are sacrificed first, so signal steps come through intact.
+    assert lost / total < 0.01, f"{lost}/{total} signal steps were displaced"
+
+
+def test_replanting_still_resolves_every_violation():
+    # Even when sparing signal dots conflicts with the constraint, the final pass wins.
+    engine = build(
+        GaussianNonOverlapMNEngine,
+        min_sep_px=4.0,
+        n_dots=700,
+        coherence=1.0,
+        field_diam_px=300,
+        dot_life_frames=0,
+    )
+    for _ in range(10):
+        engine.step()
+        assert min_pairwise_distance(engine.xys) >= engine.min_sep_px - 1e-3

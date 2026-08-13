@@ -53,6 +53,49 @@ def build_engine(rdk: RDKParams, render: RenderParams) -> BaseRDKEngine:
     return spec.engine(**kwargs)
 
 
+def simulate(
+    rdk: RDKParams, render: RenderParams, *, max_frames: int | None = None
+) -> dict[str, object]:
+    """Run the simulation and return per-frame dot state, without drawing any images.
+
+    This is what the webapp's live preview uses: sending a few hundred kilobytes of dot
+    positions and letting the browser draw them is far quicker than encoding a video, and
+    it keeps every bit of stimulus math in Python rather than duplicating it in JavaScript.
+
+    Args:
+      rdk: Motion and geometry parameters.
+      render: Timing and luminance parameters.
+      max_frames: Optional cap, to bound the payload for interactive previews.
+
+    Returns:
+      A dict with float32 `xy` of shape (frames, dots, 2) in field-centred coordinates,
+      `alpha` of shape (frames, dots), constant per-dot `dot_lum`, and the frame counts.
+    """
+    engine = build_engine(rdk, render)
+
+    total_frames = max(1, int(round(render.duration_s * render.fps)))
+    n_frames = total_frames
+    if max_frames is not None:
+        n_frames = min(n_frames, max(1, int(max_frames)))
+
+    xy = np.empty((n_frames, engine.n, 2), dtype=np.float32)
+    alpha = np.empty((n_frames, engine.n), dtype=np.float32)
+    for i in range(n_frames):
+        xy[i] = engine.xys
+        alpha[i] = engine.compute_opacity()
+        engine.step()
+
+    return {
+        "xy": xy,
+        "alpha": alpha,
+        "dot_lum": np.asarray(engine.dot_lum, dtype=np.float32),
+        "n_frames": n_frames,
+        "total_frames": total_frames,
+        "n_dots": engine.n,
+        "truncated": n_frames < total_frames,
+    }
+
+
 def render_frames(rdk: RDKParams, render: RenderParams) -> list[np.ndarray]:
     """Render frames as a list of uint8 grayscale images."""
     n_frames = int(round(render.duration_s * render.fps))
