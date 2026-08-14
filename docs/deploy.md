@@ -60,8 +60,11 @@ which are more generous for Python than for Node.
   what makes `.mp4` export possible.
 - **Memory: 2 GB / 1 vCPU on Hobby**, ample for these renders.
 - **No persistence.** Every export is regenerated per request. That is fine here because
-  renders are deterministic given the seed, so any output is reproducible from
-  `params.json`.
+  the simulation is deterministic given a seed, and exports pin one, so any download is
+  reproducible from its own `params.json`. Note that reproducible means the *stimulus*:
+  frames come back pixel for pixel and measurements to the last digit on any machine, but
+  the `.mp4` bytes depend on the ffmpeg build doing the encoding and so differ between
+  the deployment and your laptop.
 
 **Plan restriction.** Vercel's Hobby plan is free but is for personal, non-commercial
 projects. A lab tool published under an institution may need a paid plan; check the

@@ -352,6 +352,8 @@ def test_bundle_diagnostics_match_the_bundled_video(client):
     render = RenderParams(**recorded["render"])
     assert render.seed is not None
 
+    # Same machine here, so the encoded bytes match too; across machines only the
+    # stimulus is guaranteed, since encoding depends on the ffmpeg build.
     assert video_bytes(rdk, render) == packaged_video
     assert compute_diagnostics(rdk, replace(render), max_frames=None).summary() == packaged_summary
 

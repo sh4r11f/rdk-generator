@@ -3,9 +3,11 @@ import json
 import zipfile
 from dataclasses import replace
 
+import numpy as np
 import pytest
+from PIL import Image
 
-from rdk_generator import RDKParams, RenderParams, build_engine, video_bytes
+from rdk_generator import RDKParams, RenderParams, build_engine, render_frames, video_bytes
 from rdk_generator.bundle import everything_zip
 from rdk_generator.diagnostics import PANEL_KEYS, compute_diagnostics
 from rdk_generator.export import params_json, resolve_seed
@@ -41,8 +43,26 @@ def test_bundle_records_the_seed_it_used():
         assert json.loads(archive.read("params.json"))["render"]["seed"] is not None
 
 
-def test_bundle_video_is_reproducible_from_its_own_params():
-    """The strongest check: re-rendering from params.json returns the identical file."""
+def test_bundle_frames_are_reproducible_from_its_own_params():
+    """Re-rendering from params.json returns the same stimulus, pixel for pixel.
+
+    Frames rather than the .mp4, because encoded bytes depend on the ffmpeg build: the
+    frames really do reproduce on another machine, the container need not.
+    """
+    blob = everything_zip(RDK, replace(RENDER, seed=None))
+    with open_bundle(blob) as archive:
+        recorded = json.loads(archive.read("params.json"))
+        packaged = [
+            np.array(Image.open(io.BytesIO(archive.read(name))))
+            for name in sorted(n for n in archive.namelist() if n.startswith("frames/"))
+        ]
+
+    rebuilt = render_frames(RDKParams(**recorded["rdk"]), RenderParams(**recorded["render"]))
+    assert len(rebuilt) == len(packaged)
+    assert all(np.array_equal(a, b) for a, b in zip(rebuilt, packaged))
+
+
+def test_bundle_video_is_deterministic_on_one_machine():
     blob = everything_zip(RDK, replace(RENDER, seed=None))
     with open_bundle(blob) as archive:
         recorded = json.loads(archive.read("params.json"))
