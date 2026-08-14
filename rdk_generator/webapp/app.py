@@ -17,13 +17,20 @@ from flask import (
     session,
 )
 
+from ..bundle import everything_zip
 from ..diagnostics import (
     compute_diagnostics,
     figure_png,
     figures_zip,
     guide_payload,
 )
-from ..export import frames_zip_bytes, simulate, video_bytes
+from ..export import (
+    frames_zip_bytes,
+    params_json,
+    resolve_seed,
+    simulate,
+    video_bytes,
+)
 from ..methods import DEFAULT_METHOD, FIELDS, GROUP_LABELS, GROUP_ORDER, get_method, methods_payload
 from ..params import RDKParams, RenderParams
 
@@ -257,22 +264,49 @@ def create_app(*, instance_path: str | None = None) -> Flask:
         an export artifact, and it should not accumulate on disk.
         """
         rdk, render, _ = parse_form(request.form)
+        render = resolve_seed(render)
         diag = compute_diagnostics(rdk, render)
         blob = figures_zip(diag, rdk=rdk, render=render)
         return _download(blob, "application/zip", f"rdk-diagnostics-{rdk.method}.zip")
 
-    @app.post("/export/video.mp4")
-    def export_video() -> Response:
+    def _export_params() -> tuple[RDKParams, RenderParams]:
+        """Parse the form and pin the seed, so a download is reproducible from its own
+        params.json and every artifact in it describes one stimulus."""
         rdk, render, sticky = parse_form(request.form)
         _remember(rdk, sticky)
+        return rdk, resolve_seed(render)
+
+    @app.post("/export/video.mp4")
+    def export_video() -> Response:
+        rdk, render = _export_params()
         return _download(video_bytes(rdk, render), "video/mp4", f"rdk-{rdk.method}.mp4")
 
     @app.post("/export/frames.zip")
     def export_frames() -> Response:
-        rdk, render, sticky = parse_form(request.form)
-        _remember(rdk, sticky)
+        rdk, render = _export_params()
         return _download(
             frames_zip_bytes(rdk, render), "application/zip", f"rdk-frames-{rdk.method}.zip"
+        )
+
+    @app.post("/export/params.json")
+    def export_params() -> Response:
+        rdk, render = _export_params()
+        return _download(
+            params_json(rdk, render).encode("utf-8"),
+            "application/json",
+            f"rdk-params-{rdk.method}.json",
+        )
+
+    @app.post("/export/bundle.zip")
+    def export_bundle() -> Response:
+        """Everything about one stimulus: video, frames, parameters and diagnostics.
+
+        `everything_zip` pins the seed before generating anything, so the diagnostic plots
+        measure exactly the clip they ship beside rather than a different draw.
+        """
+        rdk, render = _export_params()
+        return _download(
+            everything_zip(rdk, render), "application/zip", f"rdk-bundle-{rdk.method}.zip"
         )
 
     return app

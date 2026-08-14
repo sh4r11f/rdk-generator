@@ -5,7 +5,7 @@ import json
 import os
 import tempfile
 import zipfile
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 
 import imageio.v2 as imageio
@@ -122,8 +122,33 @@ def render_frames(rdk: RDKParams, render: RenderParams) -> list[np.ndarray]:
 
 
 def params_json(rdk: RDKParams, render: RenderParams) -> str:
-    """The parameters that produced a stimulus, for reproducibility."""
-    return json.dumps({"rdk": asdict(rdk), "render": asdict(render)}, indent=2)
+    """The parameters that produced a stimulus, for reproducibility.
+
+    Names the method in full as well as by id, so the file makes sense on its own, and
+    carries the two dataclasses verbatim so it can be fed straight back in.
+    """
+    spec = get_method(rdk.method)
+    return json.dumps(
+        {
+            "method": {"id": spec.id, "label": spec.label, "tagline": spec.tagline},
+            "rdk": asdict(rdk),
+            "render": asdict(render),
+        },
+        indent=2,
+    )
+
+
+def resolve_seed(render: RenderParams) -> RenderParams:
+    """Pin a concrete seed if none was given.
+
+    A `None` seed means "different every time", which is right for a single preview and
+    wrong for a download: each artifact would be built from its own stimulus, so a
+    bundle's diagnostics would not describe its own video. Drawing the seed once makes
+    everything in one request agree, and records it so the result is reproducible.
+    """
+    if render.seed is not None:
+        return render
+    return replace(render, seed=int.from_bytes(os.urandom(4), "big"))
 
 
 def _encode_mp4(path: Path, frames: list[np.ndarray], fps: int) -> None:

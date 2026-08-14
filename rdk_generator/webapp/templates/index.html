@@ -201,7 +201,11 @@
       }
       button.solid:hover { filter: brightness(1.06); }
       button.solid:disabled, button.ghost:disabled { filter: grayscale(.5) brightness(.75); cursor: default; }
-      .export-row { display: grid; grid-template-columns: 1fr auto; gap: 10px; }
+      .export-row { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+      .export-row .wide { grid-column: 1 / -1; }
+      .export-note {
+        margin: 9px 0 0; font-size: 12px; color: var(--faint); line-height: 1.45; text-align: center;
+      }
 
       .note {
         margin-top: 13px; font-size: 13px; color: var(--warn);
@@ -322,11 +326,19 @@
           <input type="hidden" name="method" id="method-input" value="{{ selected }}" />
           <div id="fields"></div>
           <div class="export-row">
-            <button class="solid" type="button" data-export="/export/video.mp4"
-                    data-ext="mp4">Download .mp4</button>
+            <button class="solid wide" type="button" data-export="/export/bundle.zip"
+                    data-ext="zip">Download everything (.zip)</button>
+            <button class="ghost" type="button" data-export="/export/video.mp4"
+                    data-ext="mp4">Video (.mp4)</button>
             <button class="ghost" type="button" data-export="/export/frames.zip"
                     data-ext="zip">Frames (.zip)</button>
+            <button class="ghost wide" type="button" data-export="/export/params.json"
+                    data-ext="json">Parameters (.json)</button>
           </div>
+          <p class="export-note">
+            Everything bundles the video, frames, parameters and diagnostic plots &mdash; all
+            generated from one pinned seed, so the plots measure exactly that clip.
+          </p>
         </form>
 
         <div class="stack">

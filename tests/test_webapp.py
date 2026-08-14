@@ -301,3 +301,62 @@ def test_the_size_guard_only_applies_on_vercel(client, monkeypatch):
 
     # A normal server streams whatever it likes.
     assert client.post("/export/frames.zip", data=form()).status_code == 200
+
+
+# --- parameters and the combined bundle --------------------------------------
+
+
+def test_params_export_returns_json_naming_the_method(client):
+    r = client.post("/export/params.json", data=form(method="white_noise", n_dots="77"))
+    assert r.status_code == 200
+    assert r.mimetype == "application/json"
+    assert 'filename="rdk-params-white_noise.json"' in r.headers["Content-Disposition"]
+
+    payload = json.loads(r.data)
+    assert payload["method"]["id"] == "white_noise"
+    assert payload["method"]["label"] == METHODS["white_noise"].label
+    assert payload["rdk"]["n_dots"] == 77
+    # A blank seed is pinned on the way out, so the file is reproducible.
+    assert payload["render"]["seed"] is not None
+
+
+def test_bundle_export_contains_everything(client):
+    r = client.post("/export/bundle.zip", data=form(fps="30"))
+    assert r.status_code == 200
+    assert r.mimetype == "application/zip"
+    assert 'filename="rdk-bundle-brownian.zip"' in r.headers["Content-Disposition"]
+
+    with zipfile.ZipFile(io.BytesIO(r.data)) as archive:
+        assert archive.testzip() is None
+        names = set(archive.namelist())
+        assert {"params.json", "stimulus.mp4", "README.txt"} <= names
+        assert "diagnostics/diagnostics.pdf" in names
+        assert sum(1 for n in names if n.startswith("frames/")) == 6
+        assert sum(1 for n in names if n.startswith("diagnostics/panels/")) == 16
+
+
+def test_bundle_diagnostics_match_the_bundled_video(client):
+    """Guards the whole point of the bundle: one stimulus, not three."""
+    from dataclasses import replace
+
+    from rdk_generator import RDKParams, RenderParams, video_bytes
+    from rdk_generator.diagnostics import compute_diagnostics
+
+    r = client.post("/export/bundle.zip", data=form(fps="30", seed=""))
+    with zipfile.ZipFile(io.BytesIO(r.data)) as archive:
+        recorded = json.loads(archive.read("params.json"))
+        packaged_video = archive.read("stimulus.mp4")
+        packaged_summary = json.loads(archive.read("diagnostics/data/summary.json"))
+
+    rdk = RDKParams(**recorded["rdk"])
+    render = RenderParams(**recorded["render"])
+    assert render.seed is not None
+
+    assert video_bytes(rdk, render) == packaged_video
+    assert compute_diagnostics(rdk, replace(render), max_frames=None).summary() == packaged_summary
+
+
+def test_exports_pin_a_seed_so_a_frames_zip_is_reproducible(client):
+    r = client.post("/export/frames.zip", data=form(seed=""))
+    with zipfile.ZipFile(io.BytesIO(r.data)) as archive:
+        assert json.loads(archive.read("params.json"))["render"]["seed"] is not None

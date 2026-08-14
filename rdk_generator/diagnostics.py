@@ -32,6 +32,8 @@ class Diagnostics:
     Attributes:
       method: Method id the stimulus was generated with.
       n_frames: Frames measured (may be fewer than the clip's full length).
+      total_frames: Frames the clip actually has, so callers can tell whether the
+        measurement covered all of it.
       n_dots: Dot count.
       dot_size_px: Drawn dot diameter, the threshold for "these two overlap".
       expected_step_px: Distance a coherent dot travels per update.
@@ -60,6 +62,7 @@ class Diagnostics:
 
     method: str
     n_frames: int
+    total_frames: int
     n_dots: int
     dot_size_px: float
     expected_step_px: float
@@ -81,6 +84,11 @@ class Diagnostics:
     nominal_coherence: float
     min_sep_px: float | None = None
     notes: tuple[str, ...] = field(default_factory=tuple)
+
+    @property
+    def truncated(self) -> bool:
+        """Whether the measurement covered only part of the clip."""
+        return self.n_frames < self.total_frames
 
     def summary(self) -> dict[str, float | str | None]:
         """The handful of numbers worth reading before looking at any plot."""
@@ -255,6 +263,7 @@ def compute_diagnostics(
     return Diagnostics(
         method=rdk.method,
         n_frames=n_frames,
+        total_frames=total,
         n_dots=engine.n,
         dot_size_px=dot_size,
         expected_step_px=expected_step,
@@ -563,7 +572,7 @@ def panel_bytes(diag: Diagnostics, key: str, *, fmt: str = "png", dpi: int = 200
     return _render(fig, plt, fmt, dpi)
 
 
-def _per_frame_csv(diag: Diagnostics) -> str:
+def per_frame_csv(diag: Diagnostics) -> str:
     columns = {
         "frame": np.arange(diag.n_frames),
         "overlapping_pairs": diag.overlap_pairs,
@@ -581,7 +590,7 @@ def _per_frame_csv(diag: Diagnostics) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _radial_csv(diag: Diagnostics) -> str:
+def radial_csv(diag: Diagnostics) -> str:
     edges = diag.radial_edges
     lines = ["ring_inner_px,ring_outer_px,density_dots_per_px2,density_weighted_by_opacity"]
     for i in range(len(diag.radial_density)):
@@ -621,8 +630,8 @@ def figures_zip(
             )
             archive.writestr(f"panels/{index:02d}_{key}.pdf", panel_bytes(diag, key, fmt="pdf"))
 
-        archive.writestr("data/per_frame.csv", _per_frame_csv(diag))
-        archive.writestr("data/radial_density.csv", _radial_csv(diag))
+        archive.writestr("data/per_frame.csv", per_frame_csv(diag))
+        archive.writestr("data/radial_density.csv", radial_csv(diag))
         archive.writestr("data/summary.json", json.dumps(diag.summary(), indent=2))
         if rdk is not None and render is not None:
             archive.writestr(

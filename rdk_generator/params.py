@@ -46,6 +46,12 @@ class RDKParams:
     # Minimum centre-to-centre dot distance; None uses 1.1 x dot size.
     min_sep_px: float | None = None
 
+    def __post_init__(self) -> None:
+        # JSON has no tuples, so a params.json fed back in would arrive as a list and
+        # compare unequal to the object that produced it. Coerce so the file round-trips.
+        if not isinstance(self.field_center_xy_px, tuple):
+            object.__setattr__(self, "field_center_xy_px", tuple(self.field_center_xy_px))
+
 
 @dataclass(frozen=True, slots=True)
 class RenderParams:
