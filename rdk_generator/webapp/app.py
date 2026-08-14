@@ -3,7 +3,6 @@ from __future__ import annotations
 import base64
 import json
 import os
-import uuid
 from dataclasses import fields as dataclass_fields
 from pathlib import Path
 from typing import Any
@@ -13,12 +12,9 @@ from flask import (
     Flask,
     Response,
     jsonify,
-    redirect,
     render_template,
     request,
-    send_file,
     session,
-    url_for,
 )
 
 from ..diagnostics import (
@@ -26,9 +22,8 @@ from ..diagnostics import (
     figure_png,
     figures_zip,
     guide_payload,
-    write_diagnostics_png,
 )
-from ..export import simulate, write_frames_zip, write_mp4
+from ..export import frames_zip_bytes, simulate, video_bytes
 from ..methods import DEFAULT_METHOD, FIELDS, GROUP_LABELS, GROUP_ORDER, get_method, methods_payload
 from ..params import RDKParams, RenderParams
 
@@ -131,38 +126,40 @@ def create_app(*, instance_path: str | None = None) -> Flask:
     # For real deployments set RDK_SECRET_KEY to a strong random value.
     app.config["SECRET_KEY"] = os.environ.get("RDK_SECRET_KEY", "dev-secret-key-change-me")
     # Bump this if session semantics change.
-    app.config["SESSION_SCHEMA_VERSION"] = "v2"
+    app.config["SESSION_SCHEMA_VERSION"] = "v3"
 
-    output_dir = Path(app.instance_path) / "outputs"
-    output_dir.mkdir(parents=True, exist_ok=True)
+    # Deliberately no output directory: exports are streamed straight back in the
+    # response. Writing them to disk and serving them on a later request needs a
+    # writable filesystem shared across requests, which a serverless host has not got.
 
+    @app.before_request
     def _reset_if_stale() -> None:
+        # Runs for every route, so a handler that writes to the session cannot forget to
+        # stamp the schema and have its values wiped by the next page load.
         schema = app.config.get("SESSION_SCHEMA_VERSION")
         if session.get("_schema") != schema:
             session["_schema"] = schema
-            session.pop("last_job_id", None)
             session.pop("saved_params", None)
-            session["has_preview"] = False
+
+    def _download(blob: bytes, mimetype: str, filename: str) -> Response:
+        return Response(
+            blob,
+            mimetype=mimetype,
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    def _remember(rdk: RDKParams, sticky: dict) -> None:
+        saved = dict(session.get("saved_params") or {})
+        saved[rdk.method] = sticky
+        session["saved_params"] = saved
+        session["last_method"] = rdk.method
 
     @app.get("/")
     def index() -> str:
-        _reset_if_stale()
-
         saved = session.get("saved_params") or {}
         selected = session.get("last_method") or DEFAULT_METHOD
         if selected not in {m["id"] for m in methods_payload()}:
             selected = DEFAULT_METHOD
-
-        job_id = session.get("last_job_id")
-        mp4_url = None
-        zip_url = None
-        diag_url = None
-        if job_id and bool(session.get("has_preview")):
-            if (output_dir / f"{job_id}.mp4").exists() and (output_dir / f"{job_id}.zip").exists():
-                mp4_url = url_for("download_mp4", job_id=job_id)
-                zip_url = url_for("download_frames", job_id=job_id)
-                if (output_dir / f"{job_id}_diagnostics.png").exists():
-                    diag_url = url_for("download_diagnostics", job_id=job_id)
 
         return render_template(
             "index.html",
@@ -172,11 +169,6 @@ def create_app(*, instance_path: str | None = None) -> Flask:
             selected=selected,
             group_order=list(GROUP_ORDER),
             group_labels=GROUP_LABELS,
-            job_id=job_id,
-            mp4_url=mp4_url,
-            zip_url=zip_url,
-            diag_url=diag_url,
-            preview_method=session.get("preview_method"),
         )
 
     @app.get("/api/methods")
@@ -246,62 +238,21 @@ def create_app(*, instance_path: str | None = None) -> Flask:
         rdk, render, _ = parse_form(request.form)
         diag = compute_diagnostics(rdk, render)
         blob = figures_zip(diag, rdk=rdk, render=render)
-        return Response(
-            blob,
-            mimetype="application/zip",
-            headers={
-                "Content-Disposition": f'attachment; filename="rdk-diagnostics-{rdk.method}.zip"'
-            },
-        )
+        return _download(blob, "application/zip", f"rdk-diagnostics-{rdk.method}.zip")
 
-    @app.post("/generate")
-    def generate() -> Response:
-        _reset_if_stale()
-
+    @app.post("/export/video.mp4")
+    def export_video() -> Response:
         rdk, render, sticky = parse_form(request.form)
+        _remember(rdk, sticky)
+        return _download(video_bytes(rdk, render), "video/mp4", f"rdk-{rdk.method}.mp4")
 
-        # Remember values per method so switching back restores what you had.
-        saved = dict(session.get("saved_params") or {})
-        saved[rdk.method] = sticky
-        session["saved_params"] = saved
-        session["last_method"] = rdk.method
-
-        job_id = uuid.uuid4().hex
-        write_mp4(output_dir / f"{job_id}.mp4", rdk=rdk, render=render)
-        write_frames_zip(output_dir / f"{job_id}.zip", rdk=rdk, render=render)
-        write_diagnostics_png(output_dir / f"{job_id}_diagnostics.png", rdk=rdk, render=render)
-
-        session["last_job_id"] = job_id
-        session["has_preview"] = True
-        session["preview_method"] = get_method(rdk.method).label
-
-        return redirect(url_for("index"))
-
-    @app.get("/download/<job_id>.mp4")
-    def download_mp4(job_id: str):
-        return send_file(
-            output_dir / f"{job_id}.mp4", as_attachment=True, download_name=f"rdk_{job_id}.mp4"
+    @app.post("/export/frames.zip")
+    def export_frames() -> Response:
+        rdk, render, sticky = parse_form(request.form)
+        _remember(rdk, sticky)
+        return _download(
+            frames_zip_bytes(rdk, render), "application/zip", f"rdk-frames-{rdk.method}.zip"
         )
-
-    @app.get("/download/<job_id>.zip")
-    def download_frames(job_id: str):
-        return send_file(
-            output_dir / f"{job_id}.zip",
-            as_attachment=True,
-            download_name=f"rdk_frames_{job_id}.zip",
-        )
-
-    @app.get("/download/<job_id>_diagnostics.png")
-    def download_diagnostics(job_id: str):
-        return send_file(
-            output_dir / f"{job_id}_diagnostics.png",
-            as_attachment=True,
-            download_name=f"rdk_diagnostics_{job_id}.png",
-        )
-
-    @app.get("/meta/<job_id>")
-    def meta(job_id: str):
-        return send_file(output_dir / f"{job_id}.json", as_attachment=False)
 
     return app
 

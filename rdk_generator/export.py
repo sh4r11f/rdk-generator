@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import io
+import json
 import os
+import tempfile
 import zipfile
 from dataclasses import asdict
 from pathlib import Path
@@ -119,33 +121,65 @@ def render_frames(rdk: RDKParams, render: RenderParams) -> list[np.ndarray]:
     return frames
 
 
+def params_json(rdk: RDKParams, render: RenderParams) -> str:
+    """The parameters that produced a stimulus, for reproducibility."""
+    return json.dumps({"rdk": asdict(rdk), "render": asdict(render)}, indent=2)
+
+
+def _encode_mp4(path: Path, frames: list[np.ndarray], fps: int) -> None:
+    # imageio expects frames as HxW or HxWx3; we use HxW and specify fps.
+    with imageio.get_writer(path, fps=fps, codec="libx264", quality=8) as writer:
+        for frame in frames:
+            writer.append_data(frame)
+
+
+def video_bytes(rdk: RDKParams, render: RenderParams) -> bytes:
+    """Render and encode an `.mp4`, returning its bytes.
+
+    ffmpeg needs a real path to write to, so this encodes into a temporary directory and
+    reads the result back. Nothing is left behind, which is what lets the webapp serve an
+    export straight back in the response instead of storing it between requests.
+    """
+    frames = render_frames(rdk, render)
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "clip.mp4"
+        _encode_mp4(path, frames, render.fps)
+        return path.read_bytes()
+
+
 def write_mp4(
     out_path: str | os.PathLike,
     *,
     rdk: RDKParams,
     render: RenderParams,
 ) -> Path:
-    """Render and write an `.mp4` to `out_path`."""
+    """Render and write an `.mp4` to `out_path`, with a `.json` params sidecar."""
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    frames = render_frames(rdk, render)
-    # imageio expects frames as HxW or HxWx3; we use HxW and specify fps.
-    with imageio.get_writer(out_path, fps=render.fps, codec="libx264", quality=8) as w:
-        for f in frames:
-            w.append_data(f)
+    _encode_mp4(out_path, render_frames(rdk, render), render.fps)
 
-    # Store a small sidecar for reproducibility
     sidecar = out_path.with_suffix(".json")
     try:
-        import json
-
-        payload = {"rdk": asdict(rdk), "render": asdict(render)}
-        sidecar.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        sidecar.write_text(params_json(rdk, render), encoding="utf-8")
     except Exception:
         pass
 
     return out_path
+
+
+def frames_zip_bytes(rdk: RDKParams, render: RenderParams, *, image_format: str = "png") -> bytes:
+    """Render every frame as an image and bundle them, with a params sidecar, into a zip."""
+    frames = render_frames(rdk, render)
+
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, mode="w", compression=zipfile.ZIP_DEFLATED) as z:
+        for i, frame in enumerate(frames):
+            buf = io.BytesIO()
+            Image.fromarray(frame, mode="L").save(buf, format=image_format.upper())
+            z.writestr(f"frame_{i:05d}.{image_format}", buf.getvalue())
+        z.writestr("params.json", params_json(rdk, render))
+    return archive.getvalue()
 
 
 def write_frames_zip(
@@ -158,14 +192,5 @@ def write_frames_zip(
     """Render and write frames as a zip of images."""
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-
-    frames = render_frames(rdk, render)
-
-    with zipfile.ZipFile(out_path, mode="w", compression=zipfile.ZIP_DEFLATED) as z:
-        for i, frame in enumerate(frames):
-            img = Image.fromarray(frame, mode="L")
-            buf = io.BytesIO()
-            img.save(buf, format=image_format.upper())
-            z.writestr(f"frame_{i:05d}.{image_format}", buf.getvalue())
-
+    out_path.write_bytes(frames_zip_bytes(rdk, render, image_format=image_format))
     return out_path

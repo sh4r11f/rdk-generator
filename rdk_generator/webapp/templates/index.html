@@ -200,6 +200,8 @@
         background: linear-gradient(180deg, #e6cd97, #cfab61);
       }
       button.solid:hover { filter: brightness(1.06); }
+      button.solid:disabled, button.ghost:disabled { filter: grayscale(.5) brightness(.75); cursor: default; }
+      .export-row { display: grid; grid-template-columns: 1fr auto; gap: 10px; }
 
       .note {
         margin-top: 13px; font-size: 13px; color: var(--warn);
@@ -316,10 +318,15 @@
       </section>
 
       <div class="grid" id="studio-view">
-        <form class="card" method="post" action="/generate" id="form">
+        <form class="card" id="form" onsubmit="return false">
           <input type="hidden" name="method" id="method-input" value="{{ selected }}" />
           <div id="fields"></div>
-          <button class="solid" type="submit" style="width:100%">Export .mp4 + frames</button>
+          <div class="export-row">
+            <button class="solid" type="button" data-export="/export/video.mp4"
+                    data-ext="mp4">Download .mp4</button>
+            <button class="ghost" type="button" data-export="/export/frames.zip"
+                    data-ext="zip">Frames (.zip)</button>
+          </div>
         </form>
 
         <div class="stack">
@@ -335,22 +342,14 @@
             </div>
             <div class="note" id="trunc" hidden></div>
 
-            {% if mp4_url %}
-              <div class="links">
-                <a href="{{ mp4_url }}">Download .mp4</a>
-                <a href="{{ zip_url }}">Frames (.zip)</a>
-                {% if diag_url %}<a href="{{ diag_url }}">Diagnostics (.png)</a>{% endif %}
-                <a href="/meta/{{ job_id }}">Params (.json)</a>
-                {% if preview_method %}<span class="pill">last export: {{ preview_method }}</span>{% endif %}
-              </div>
-            {% endif %}
           </section>
 
           <section class="card">
             <div class="card-head">
               <p class="section-title">Diagnostics</p>
               <span class="grow"></span>
-              <button class="ghost" id="diag-zip" type="button">Download figures</button>
+              <button class="ghost" id="diag-zip" type="button"
+                      data-export="/api/diagnostics.zip" data-ext="zip">Download figures</button>
               <button class="ghost" id="diag-run" type="button">Measure stimulus</button>
             </div>
             <p class="diag-hint" id="diag-hint">
@@ -677,31 +676,38 @@
 
       diagBtn.addEventListener("click", runDiagnostics);
 
-      const zipBtn = document.getElementById("diag-zip");
-      zipBtn.addEventListener("click", async () => {
-        zipBtn.disabled = true;
-        zipBtn.textContent = "Building\u2026";
+      // Exports are rendered on demand and streamed straight back, so the server keeps
+      // nothing between requests and the same code works on a serverless host.
+      async function downloadExport(button) {
+        const endpoint = button.dataset.export;
+        const label = button.textContent;
+        button.disabled = true;
+        button.textContent = "Rendering\u2026";
         try {
-          const res = await fetch("/api/diagnostics.zip", {
-            method: "POST",
-            body: new FormData(form),
-          });
+          const res = await fetch(endpoint, { method: "POST", body: new FormData(form) });
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           const blob = await res.blob();
+          // The server already names each export distinctly; only fall back if it did not.
+          const disposition = res.headers.get("Content-Disposition") || "";
+          const named = /filename="([^"]+)"/.exec(disposition);
           const url = URL.createObjectURL(blob);
           const link = document.createElement("a");
           link.href = url;
-          link.download = `rdk-diagnostics-${currentId}.zip`;
+          link.download = named ? named[1] : `rdk-${currentId}.${button.dataset.ext}`;
           document.body.appendChild(link);
           link.click();
           link.remove();
           URL.revokeObjectURL(url);
         } catch (err) {
-          diagHint.textContent = "Could not build the figure bundle.";
+          setStatus("error", "export failed");
         } finally {
-          zipBtn.disabled = false;
-          zipBtn.textContent = "Download figures";
+          button.disabled = false;
+          button.textContent = label;
         }
+      }
+
+      document.querySelectorAll("[data-export]").forEach((button) => {
+        button.addEventListener("click", () => downloadExport(button));
       });
 
       /* ---------------- wiring ---------------- */

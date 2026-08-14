@@ -10,7 +10,15 @@ This package provides:
 PsychoPy integration is optional and lives in `rdk_generator.psychopy_adapter`.
 """
 
-from .export import build_engine, render_frames, simulate, write_frames_zip, write_mp4
+from .export import (
+    build_engine,
+    frames_zip_bytes,
+    render_frames,
+    simulate,
+    video_bytes,
+    write_frames_zip,
+    write_mp4,
+)
 from .methods import DEFAULT_METHOD, METHODS, MethodSpec, get_method, list_methods
 from .params import RDKParams, RenderParams
 
@@ -21,10 +29,12 @@ __all__ = [
     "RDKParams",
     "RenderParams",
     "build_engine",
+    "frames_zip_bytes",
     "get_method",
     "list_methods",
     "render_frames",
     "simulate",
+    "video_bytes",
     "write_frames_zip",
     "write_mp4",
 ]

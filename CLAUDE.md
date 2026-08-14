@@ -7,7 +7,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Setup: `python -m venv .venv && source .venv/bin/activate && pip install -e '.[dev]'` (plain `pip install -e .` skips pytest-cov and ruff)
 - Test: `pytest` (pyproject sets `testpaths=tests`, `-q`)
 - Lint/format: `ruff check --fix . && ruff format .` (line-length 100 — configured in pyproject.toml)
-- Webapp: `flask --app rdk_generator.webapp.app run` → http://127.0.0.1:5000/
+- Webapp: `flask --app rdk_generator.webapp.app run --port 5050` → http://127.0.0.1:5050/ (port 5000 is taken by macOS AirPlay)
+- Deploy: `vercel` (config in `vercel.json` + `api/index.py`; `requirements.txt` mirrors `[project.dependencies]` and must be kept in step)
 
 ## Architecture
 
@@ -16,7 +17,7 @@ Two strictly separated layers (see docs/modules.md):
 - Headless generator (`params`, `sampling`, `luminance`, `core`, `export`): pure NumPy + PIL + imageio, no display. All stimulus math lives here. Never import PsychoPy from this layer.
 - PsychoPy integration (`psychopy_adapter.py`): optional realtime presentation. Must stay import-safe when PsychoPy is not installed; its PsychoPy-only paths are marked `# pragma: no cover`.
 
-The Flask webapp (`rdk_generator/webapp/`) is a thin localhost-only UI over `export`. Synchronous blocking render in `POST /generate`, the dev fallback secret key, and unbounded `instance/outputs/` growth are accepted by design — don't fix them unprompted.
+The Flask webapp (`rdk_generator/webapp/`) is a thin UI over `export`. It is deployable to serverless hosts (see docs/deploy.md), which constrains it: **nothing may be written to disk and nothing may persist between requests**. Exports are rendered on demand and streamed back from `POST /export/*`; never reintroduce a write-then-download-later flow or a module-import side effect that touches the filesystem. `tests/test_webapp.py::test_nothing_is_written_to_disk_by_any_request` guards this. The dev fallback secret key is accepted by design.
 
 ## Conventions
 

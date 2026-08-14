@@ -76,6 +76,13 @@ PsychoPy integration is optional and provided by [rdk_generator/psychopy_adapter
 - `rdk_generator.psychopy_adapter.RDKStim` presents any registered method in realtime. It
   drives the same headless engine used for export, so display and export cannot diverge.
 
+## Deploying
+
+The app keeps no server-side state and writes nothing to disk: every export is
+rendered on demand and streamed back in the response, so it runs on serverless hosts
+as well as a normal server. See [docs/deploy.md](docs/deploy.md) for Vercel setup and
+its limits.
+
 ## Module guide
 
 See [docs/modules.md](docs/modules.md).
