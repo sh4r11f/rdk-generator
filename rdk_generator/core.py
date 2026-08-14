@@ -244,8 +244,9 @@ class WhiteNoiseRDKEngine(BaseRDKEngine):
     method_id = "white_noise"
 
     def _move_noise(self, noise: np.ndarray, step_scale: float) -> None:
-        count = int(np.count_nonzero(noise))
-        self.xys[noise] = rand_points_in_circle(count, self.radius, self.rng)
+        # Route through _respawn rather than placing directly: it records the teleport
+        # and, under the non-overlap mixin, honours the minimum separation.
+        self._respawn(noise, reason="relocated")
 
 
 class RandomDirectionRDKEngine(BaseRDKEngine):
@@ -518,3 +519,24 @@ class FrameRenderer:
             patch[m] = v
 
         return (np.clip(img, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
+
+
+class GaussianNonOverlapWNEngine(GaussianNonOverlapMixin, WhiteNoiseRDKEngine):
+    """Our modifications on the white-noise base.
+
+    Noise dots still jump to a fresh position every frame, but now to one that clears the
+    minimum separation, so the field never has two dots on top of each other even though
+    most of it is teleporting.
+    """
+
+    method_id = "gaussian_nonoverlap_white_noise"
+
+
+class GaussianNonOverlapRDEngine(GaussianNonOverlapMixin, RandomDirectionRDKEngine):
+    """Our modifications on the random-direction base.
+
+    Noise dots keep their fixed headings; a dot replanted for crowding gets a new heading
+    along with its new position, exactly as a respawn would.
+    """
+
+    method_id = "gaussian_nonoverlap_random_direction"

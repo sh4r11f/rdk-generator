@@ -102,15 +102,18 @@ Not a new algorithm. It is a canonical method, **unchanged**, plus two placement
 rendering modifications. Every motion rule of the base is inherited exactly, so a run at
 coherence *c* is directly comparable to that base at coherence *c*.
 
-The modifications live in a mixin that composes onto any engine, so the repository ships
-two variants:
+The modifications live in a mixin that composes onto any engine, so **each of the four
+canonical algorithms has a counterpart**:
 
-- **`gaussian_nonoverlap`** (the default) is built on **Movshon–Newsome**, the algorithm
-  the MT and perceptual-decision literature is written in.
-- **`gaussian_nonoverlap_brownian`** is built on **Brownian**. Its coherence is an exact
-  count rather than a per-frame Bernoulli draw, and because its dots move a pixel or two
-  per frame instead of teleporting, the separation constraint almost never fires. Prefer it
-  when coherence must be exact.
+| Variant | Base | Why you would pick it |
+|---|---|---|
+| `gaussian_nonoverlap` (default) | Movshon–Newsome | Comparability with the MT and decision literature. |
+| `gaussian_nonoverlap_brownian` | Brownian | Exact-count coherence; the constraint almost never fires, so the least interference. |
+| `gaussian_nonoverlap_white_noise` | White noise | Maximum noise displacement with a stable, non-overlapping dot field. Does the most rejection sampling, so it renders slowest. |
+| `gaussian_nonoverlap_random_direction` | Random direction | Transparent-motion percept, unusually clean with even spacing. |
+
+Each inherits its base's motion untouched, so its coherence is directly comparable to that
+base — and only to that base.
 
 **Modification 1 — Gaussian envelope.** Per-dot opacity falls off with distance from the
 field centre, `alpha = exp(−r² / 2σ²)`, with σ defaulting to a quarter of the field
@@ -178,6 +181,7 @@ luminances are `background ± dot_contrast/2`, clipped to the displayable range.
 | Transparent-motion appearance, direction-defined noise | `random_direction` |
 | Even spacing and a soft aperture on the classic paradigm | `gaussian_nonoverlap` |
 | The same, with exact coherence and minimal interference | `gaussian_nonoverlap_brownian` |
+| The same, on the white-noise or random-direction base | `gaussian_nonoverlap_white_noise`, `gaussian_nonoverlap_random_direction` |
 
 Coherence values are **not** interchangeable across rows of that table, with one exception:
 each of our variants is directly comparable to the canonical method it is built on, because

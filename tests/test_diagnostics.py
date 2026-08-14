@@ -10,7 +10,7 @@ from rdk_generator.diagnostics import (
 from rdk_generator.methods import METHODS
 
 RENDER = RenderParams(width_px=160, height_px=160, fps=60, duration_s=0.5, seed=7)
-OUR_IDS = ("gaussian_nonoverlap", "gaussian_nonoverlap_brownian")
+OUR_IDS = tuple(sorted(m.id for m in METHODS.values() if not m.canonical))
 
 
 def measure(method_id, **overrides):
@@ -234,3 +234,79 @@ def test_replanting_loss_metric_can_detect_real_loss(monkeypatch):
         max_frames=8,
     )
     assert np.nanmean(diag.lost_to_replanting) > 0.2
+
+
+# --- validation against independently derivable values -----------------------
+
+
+def test_radial_density_integrates_back_to_the_dot_count():
+    """Sum of density x ring area over all rings must return n_dots exactly."""
+    for method_id in sorted(METHODS):
+        diag = measure(method_id, n_dots=180)
+        ring_area = np.pi * (diag.radial_edges[1:] ** 2 - diag.radial_edges[:-1] ** 2)
+        recovered = float((diag.radial_density * ring_area).sum())
+        assert abs(recovered - diag.n_dots) < 0.51, f"{method_id} recovered {recovered}"
+
+
+@pytest.mark.parametrize(
+    ("n_dots", "field_diam_px", "dot_size_px"), [(200, 200, 3), (200, 200, 6), (400, 300, 4)]
+)
+def test_overlap_count_matches_the_poisson_prediction(n_dots, field_diam_px, dot_size_px):
+    """For n uniform points in a disc of radius R, pairs closer than s are C(n,2)(s/R)^2.
+
+    Independent of the diagnostics code, so it validates the counting rather than
+    restating it. `dot_life_frames=1` resamples every dot every frame, which makes the
+    frames independent and the average converge.
+    """
+    radius = field_diam_px / 2
+    predicted = n_dots * (n_dots - 1) / 2 * (dot_size_px / radius) ** 2
+
+    measured = []
+    for seed in range(4):
+        render = RenderParams(width_px=100, height_px=100, fps=60, duration_s=1.0, seed=seed)
+        diag = compute_diagnostics(
+            RDKParams(
+                method="brownian",
+                n_dots=n_dots,
+                field_diam_px=field_diam_px,
+                dot_size_px=dot_size_px,
+                dot_life_frames=1,
+            ),
+            render,
+            max_frames=20,
+        )
+        measured.append(diag.overlap_pairs.mean())
+
+    assert abs(np.mean(measured) / predicted - 1) < 0.12
+
+
+@pytest.mark.parametrize("method_id", sorted(METHODS))
+def test_step_magnitudes_are_exactly_the_algorithms_step(method_id):
+    """Every measured step equals the expected one, with no relocations leaking in."""
+    diag = measure(method_id, speed_px_per_s=60, dot_life_frames=0, field_diam_px=600)
+    assert diag.step_magnitudes.size
+    assert np.allclose(diag.step_magnitudes, diag.expected_step_px, atol=1e-3)
+
+
+def test_relocations_are_counted_from_the_engine_not_guessed_from_distance():
+    """White noise relocates exactly its noise dots, however far they happen to land."""
+    diag = measure("white_noise", n_dots=200, coherence=0.5, dot_life_frames=0, field_diam_px=600)
+    assert abs(diag.relocations.mean() - 100) < 3
+
+    # A small aperture makes many relocations land near their old position; a
+    # displacement-threshold classifier would miss those, an exact record does not.
+    tight = measure("white_noise", n_dots=200, coherence=0.5, dot_life_frames=0, field_diam_px=120)
+    assert abs(tight.relocations.mean() - 100) < 3
+
+
+def test_radial_density_is_flat_except_at_the_rim():
+    """Uniform placement everywhere, minus the ring that aperture exits keep draining."""
+    render = RenderParams(width_px=120, height_px=120, fps=60, duration_s=1.0, seed=3)
+    diag = compute_diagnostics(
+        RDKParams(method="brownian", n_dots=6000, field_diam_px=300, dot_life_frames=1),
+        render,
+        max_frames=20,
+    )
+    profile = diag.radial_density / diag.radial_density.mean()
+    assert profile[:-1].std() < 0.03, "interior must be flat"
+    assert profile[-1] < 0.97, "exit-respawn should visibly deplete the outer ring"

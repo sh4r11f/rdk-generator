@@ -21,7 +21,12 @@ from flask import (
     url_for,
 )
 
-from ..diagnostics import compute_diagnostics, figure_png, write_diagnostics_png
+from ..diagnostics import (
+    compute_diagnostics,
+    figure_png,
+    guide_payload,
+    write_diagnostics_png,
+)
 from ..export import simulate, write_frames_zip, write_mp4
 from ..methods import DEFAULT_METHOD, FIELDS, GROUP_LABELS, GROUP_ORDER, get_method, methods_payload
 from ..params import RDKParams, RenderParams
@@ -161,6 +166,7 @@ def create_app(*, instance_path: str | None = None) -> Flask:
         return render_template(
             "index.html",
             methods_json=json.dumps(methods_payload()),
+            guide_json=json.dumps(guide_payload()),
             saved_json=json.dumps(saved),
             selected=selected,
             group_order=list(GROUP_ORDER),
@@ -175,6 +181,10 @@ def create_app(*, instance_path: str | None = None) -> Flask:
     @app.get("/api/methods")
     def api_methods() -> Response:
         return jsonify(methods_payload())
+
+    @app.get("/api/diagnostic-guide")
+    def api_diagnostic_guide() -> Response:
+        return jsonify(guide_payload())
 
     @app.post("/api/preview")
     def api_preview() -> Response:

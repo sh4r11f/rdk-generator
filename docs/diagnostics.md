@@ -72,6 +72,32 @@ carries no information, so only motion does. With `uniform` it sits above the ba
 that is expected — just be aware the dots add a luminance signal that co-varies with dot
 count.
 
+## How we know the measurements are right
+
+Each metric is checked against a value derived without reference to the diagnostics code,
+and `tests/test_diagnostics.py` pins the results.
+
+- **Overlap counting.** For *n* uniform points in a disc of radius *R*, the expected number
+  of pairs closer than *s* is `C(n,2)·(s/R)²`. Measured counts match to within 2% across
+  dot counts, dot sizes and field sizes.
+- **Radial density.** Integrating density × ring area over all rings returns the dot count
+  exactly. The sampler on its own is flat to the Poisson noise floor.
+- **Step size and direction.** Every measured step equals the algorithm's expected step for
+  all eight methods. At coherence 1 every angle is the requested direction exactly; at
+  coherence 0 the mean resultant length is under 0.01, i.e. uniform.
+- **Relocations.** Teleports are read from the engine's own record rather than inferred
+  from displacement size. Inferring them misfiles every respawn that lands near its old
+  position — 1.7% of them in a small aperture — and contaminates the step histogram.
+- **Coherence delivery.** Against a resolver that replants every dot in conflict the
+  replanting trace reads 0.71, so the zero our variants report is a measured zero rather
+  than a blind metric.
+
+**One finding worth knowing.** The radial density profile is flat across the interior but
+dips 6–15% in the outermost ring. That is not a measurement artefact and not a bug: dots
+crossing the rim respawn uniformly across the *whole* aperture, so the edge annulus is
+continuously drained. It is a real consequence of the uniform-respawn convention, and
+wraparound would not show it.
+
 ## Using it
 
 ```python

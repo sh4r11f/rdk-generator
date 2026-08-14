@@ -6,6 +6,9 @@
     <title>RDK Studio</title>
     <style>
       *, *::before, *::after { box-sizing: border-box; }
+      /* `display: grid/flex` on a component beats the [hidden] UA rule, so views
+         would stack instead of swapping. */
+      [hidden] { display: none !important; }
 
       :root {
         /* Warm near-black and ivory rather than blue-black and white: lower chroma
@@ -64,7 +67,7 @@
       }
 
       .tabs {
-        display: flex; align-items: center; gap: 4px; flex: 1 1 auto;
+        display: flex; align-items: center; gap: 4px; flex: 1 1 auto; min-width: 0;
         overflow-x: auto; scrollbar-width: none; padding: 4px;
       }
       .tabs::-webkit-scrollbar { display: none; }
@@ -106,6 +109,46 @@
         transition: color .15s, border-color .15s;
       }
       .icon-btn:hover { color: var(--accent); border-color: var(--border-hi); }
+
+      .views { display: flex; gap: 3px; flex: none; padding: 3px; border-radius: 10px;
+        background: rgba(236, 231, 223, 0.04); }
+      .view-btn {
+        font: inherit; font-size: 13.5px; color: var(--muted); cursor: pointer;
+        padding: 6px 13px; border-radius: 8px; border: 0; background: transparent;
+        white-space: nowrap; transition: color .15s, background .15s;
+      }
+      .view-btn:hover { color: var(--text); }
+      .view-btn[aria-selected="true"] { color: var(--accent-ink); background: var(--accent); }
+      .tab-sep { width: 1px; height: 22px; background: var(--border); flex: none; margin: 0 5px; }
+      @media (max-width: 780px) {
+        .appbar { gap: 12px; padding: 0 14px; }
+        .brand b { display: none; }
+      }
+
+      /* ---------- guide ---------- */
+      .guide { max-width: 900px; }
+      .guide-lede {
+        font-size: 15.5px; color: var(--muted); margin: 0 0 26px; line-height: 1.62;
+      }
+      .guide-item { padding: 20px 0; border-top: 1px solid var(--border); }
+      .guide-item:first-of-type { border-top: 0; padding-top: 4px; }
+      .guide-item h3 {
+        font-family: var(--serif); font-size: 21px; font-weight: 600; margin: 0 0 14px;
+      }
+      .guide-row { display: grid; grid-template-columns: 108px minmax(0, 1fr); gap: 14px;
+        margin-bottom: 11px; }
+      @media (max-width: 620px) { .guide-row { grid-template-columns: 1fr; gap: 3px; } }
+      .guide-row dt {
+        font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em;
+        color: var(--faint); font-weight: 650; padding-top: 4px;
+      }
+      .guide-row dd { margin: 0; font-size: 14.5px; color: var(--muted); line-height: 1.62; }
+      .guide-row.is-validation dd {
+        border-left: 2px solid rgba(217, 185, 120, 0.4); padding-left: 13px;
+        background: rgba(217, 185, 120, 0.05); border-radius: 0 7px 7px 0;
+        padding-top: 8px; padding-bottom: 8px;
+      }
+      .guide-row.is-validation dt { color: var(--accent); }
 
       /* ---------- layout ---------- */
       .wrap { max-width: 1400px; margin: 0 auto; padding: 24px 24px 72px; }
@@ -249,6 +292,10 @@
   <body>
     <nav class="appbar">
       <div class="brand"><span class="mark"></span><b>RDK Studio</b></div>
+      <div class="views" role="tablist" aria-label="View">
+        <button class="view-btn" type="button" data-view="studio" aria-selected="true">Studio</button>
+        <button class="view-btn" type="button" data-view="guide" aria-selected="false">Diagnostics guide</button>
+      </div>
       <div class="tabs" id="tabs" role="tablist" aria-label="RDK method"></div>
       <div class="bar-right">
         <span class="pill" id="status" data-state="busy"><span class="dot"></span><span id="status-text">starting</span></span>
@@ -257,7 +304,18 @@
     </nav>
 
     <div class="wrap">
-      <div class="grid">
+      <section class="card guide" id="guide-view" hidden>
+        <p class="section-title">How each diagnostic is measured</p>
+        <p class="guide-lede">
+          Every panel in the Diagnostics report answers one question about whether the
+          stimulus is really what its parameters asked for. This is what each one computes,
+          the fault it is there to catch, and &mdash; where it matters &mdash; how we know
+          the measurement itself is right.
+        </p>
+        <div id="guide-body"></div>
+      </section>
+
+      <div class="grid" id="studio-view">
         <form class="card" method="post" action="/generate" id="form">
           <input type="hidden" name="method" id="method-input" value="{{ selected }}" />
           <div id="fields"></div>
@@ -311,6 +369,7 @@
 
     <script>
       const METHODS = {{ methods_json|safe }};
+      const GUIDE = {{ guide_json|safe }};
       const SAVED = {{ saved_json|safe }};
       const GROUP_ORDER = {{ group_order|tojson }};
       const GROUP_LABELS = {{ group_labels|tojson }};
@@ -523,6 +582,39 @@
         requestAnimationFrame(loop);
       }
 
+      /* ---------------- guide view ---------------- */
+
+      function renderGuide() {
+        const row = (label, text, cls) =>
+          text
+            ? `<div class="guide-row ${cls || ""}"><dt>${esc(label)}</dt><dd>${esc(text)}</dd></div>`
+            : "";
+        document.getElementById("guide-body").innerHTML = GUIDE.map(
+          (g) =>
+            `<article class="guide-item"><h3>${esc(g.title)}</h3><dl>` +
+            row("Measures", g.measures) +
+            row("Detects", g.detects) +
+            row("Reading it", g.reading) +
+            row("Validation", g.validation, "is-validation") +
+            `</dl></article>`
+        ).join("");
+      }
+
+      function showView(view) {
+        const guide = view === "guide";
+        document.getElementById("guide-view").hidden = !guide;
+        document.getElementById("studio-view").hidden = guide;
+        document.getElementById("tabs").style.display = guide ? "none" : "";
+        document.querySelectorAll(".view-btn").forEach((b) => {
+          b.setAttribute("aria-selected", String(b.dataset.view === view));
+        });
+        window.scrollTo({ top: 0 });
+      }
+
+      document.querySelectorAll(".view-btn").forEach((b) => {
+        b.addEventListener("click", () => showView(b.dataset.view));
+      });
+
       /* ---------------- diagnostics ---------------- */
 
       const diagBtn = document.getElementById("diag-run");
@@ -624,6 +716,7 @@
       renderTabs();
       renderFields();
       renderDoc();
+      renderGuide();
       requestAnimationFrame(loop);
       fetchPreview();
     </script>

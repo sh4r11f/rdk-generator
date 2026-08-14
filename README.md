@@ -5,8 +5,8 @@ This repo provides:
 
 - **Four canonical RDK algorithms** from the vision-science literature — Movshon–Newsome,
   Brownian (random walk), white noise (random position), and random direction — plus a
-  **Gaussian non-overlapping** variant of our own, offered on either the Movshon–Newsome
-  or the Brownian base.
+  **Gaussian non-overlapping** variant of our own on each of the four bases, giving eight
+  methods in total.
 - Optional **luminance balancing** (dark/bright dots mixed so the field's mean luminance
   equals the background), available to every method.
 - **Diagnostics** that measure what a stimulus actually did rather than what it was asked
@@ -49,9 +49,9 @@ The UI generates:
 from rdk_generator import RDKParams, RenderParams, list_methods
 from rdk_generator.export import write_frames_zip, write_mp4
 
-# Any registered method: "movshon_newsome", "brownian", "white_noise",
-# "random_direction", "gaussian_nonoverlap" (the default, our variant on an MN base),
-# or "gaussian_nonoverlap_brownian".
+# Four canonical methods -- "movshon_newsome", "brownian", "white_noise",
+# "random_direction" -- and our variant on each, e.g. "gaussian_nonoverlap"
+# (the default, MN-based) or "gaussian_nonoverlap_white_noise".
 print([m.id for m in list_methods()])
 
 rdk = RDKParams(method="brownian", n_dots=300, coherence=0.5, direction_deg=90, field_diam_px=300)

@@ -18,7 +18,9 @@ from .core import (
     BaseRDKEngine,
     BrownianRDKEngine,
     GaussianNonOverlapMNEngine,
+    GaussianNonOverlapRDEngine,
     GaussianNonOverlapRDKEngine,
+    GaussianNonOverlapWNEngine,
     MovshonNewsomeRDKEngine,
     RandomDirectionRDKEngine,
     WhiteNoiseRDKEngine,
@@ -557,7 +559,7 @@ METHODS: dict[str, MethodSpec] = {
         id="gaussian_nonoverlap",
         label="Gaussian non-overlapping (MN)",
         short="Ours",
-        tab="Ours (MN)",
+        tab="Ours \u00b7 MN",
         engine=GaussianNonOverlapMNEngine,
         tagline="The Movshon-Newsome method with a soft aperture and evenly spaced dots.",
         noise_rule="Relocated to a random position when its sequence updates, subject to "
@@ -598,7 +600,7 @@ METHODS: dict[str, MethodSpec] = {
         id="gaussian_nonoverlap_brownian",
         label="Gaussian non-overlapping (Brownian)",
         short="Ours BM",
-        tab="Ours (Brownian)",
+        tab="Ours \u00b7 BM",
         engine=GaussianNonOverlapRDKEngine,
         tagline="The same two modifications on a Brownian base - exact coherence, cheaper "
         "to enforce.",
@@ -627,6 +629,74 @@ METHODS: dict[str, MethodSpec] = {
             "Prefer this variant when coherence must be exact.",
         ),
         references=(_REF_SCASE, _REF_PILLY, _REF_YELLOTT, _REF_MORGAN),
+        method_params=("dot_life_frames", "signal_rule", "gauss_sigma_px", "min_sep_px"),
+    ),
+    "gaussian_nonoverlap_white_noise": MethodSpec(
+        id="gaussian_nonoverlap_white_noise",
+        label="Gaussian non-overlapping (White noise)",
+        short="Ours WN",
+        tab="Ours \u00b7 WN",
+        engine=GaussianNonOverlapWNEngine,
+        tagline="The same two modifications on a white-noise base.",
+        noise_rule="Relocated to a random position every frame, subject to the minimum "
+        "separation (inherited from white noise).",
+        canonical=False,
+        steps=(
+            "Place every dot by rejection sampling so no two centres are closer than the "
+            "minimum separation - blue-noise placement rather than uniform.",
+            _LIFETIME_STEP + " Respawns also respect the minimum separation.",
+            "Run the white-noise motion unchanged: exact-count signal selection, signal dots "
+            "along the common direction, every noise dot relocated to a fresh position - but "
+            "now to one that clears its neighbours.",
+            _EXIT_STEP,
+            "Replant any dots that ended the step too close to a neighbour, sacrificing "
+            "noise dots first so coherent steps survive.",
+            "Scale each dot's opacity by a Gaussian in its distance from the field centre, "
+            "alpha = exp(-r^2 / 2 sigma^2), so the aperture has no hard edge.",
+        ),
+        notes=(
+            "Motion is identical to white noise, so coherence is directly comparable "
+            "between the two.",
+            "Most of the field teleports every frame, so this variant does the most "
+            "rejection sampling of the four - expect it to be the slowest to render.",
+            "The dot count stays exactly constant even though nearly every noise dot moves "
+            "somewhere new each frame.",
+        ),
+        references=(_REF_SCASE, _REF_PILLY, _REF_WATAMANIUK, _REF_YELLOTT),
+        method_params=("dot_life_frames", "signal_rule", "gauss_sigma_px", "min_sep_px"),
+    ),
+    "gaussian_nonoverlap_random_direction": MethodSpec(
+        id="gaussian_nonoverlap_random_direction",
+        label="Gaussian non-overlapping (Random direction)",
+        short="Ours RD",
+        tab="Ours \u00b7 RD",
+        engine=GaussianNonOverlapRDEngine,
+        tagline="The same two modifications on a random-direction base.",
+        noise_rule="Moves at signal speed along a heading fixed when the dot was born "
+        "(inherited from random direction).",
+        canonical=False,
+        steps=(
+            "Place every dot by rejection sampling so no two centres are closer than the "
+            "minimum separation, and give each a random heading.",
+            _LIFETIME_STEP + " Respawning is the only thing that redraws a heading.",
+            "Run the random-direction motion unchanged: signal dots along the common "
+            "direction, every noise dot along its own fixed heading.",
+            _EXIT_STEP,
+            "Replant any dots that ended the step too close to a neighbour, sacrificing "
+            "noise dots first so coherent steps survive.",
+            "Scale each dot's opacity by a Gaussian in its distance from the field centre, "
+            "alpha = exp(-r^2 / 2 sigma^2), so the aperture has no hard edge.",
+        ),
+        notes=(
+            "Motion is identical to random direction, so coherence is directly comparable "
+            "between the two.",
+            "A dot replanted for crowding gets a new heading with its new position, exactly "
+            "as an ordinary respawn does, so replanting slightly refreshes the noise "
+            "directions as well as the layout.",
+            "Straight-line noise plus even spacing makes the transparent-motion percept "
+            "unusually clean.",
+        ),
+        references=(_REF_SCASE, _REF_PILLY, _REF_YELLOTT, _REF_PEIRCE),
         method_params=("dot_life_frames", "signal_rule", "gauss_sigma_px", "min_sep_px"),
     ),
 }

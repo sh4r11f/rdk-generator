@@ -15,8 +15,9 @@ from rdk_generator.methods import (
 
 ALL_IDS = sorted(METHODS)
 
-# Our two variants: the same modifications on different canonical bases.
-OUR_IDS = {"gaussian_nonoverlap", "gaussian_nonoverlap_brownian"}
+# Derived from the registry rather than hardcoded, so adding a variant cannot leave
+# these lists quietly stale.
+OUR_IDS = {m.id for m in METHODS.values() if not m.canonical}
 CANONICAL_IDS = [m for m in ALL_IDS if m not in OUR_IDS]
 
 
@@ -28,6 +29,8 @@ def test_registry_covers_the_documented_methods():
         "random_direction",
         "gaussian_nonoverlap",
         "gaussian_nonoverlap_brownian",
+        "gaussian_nonoverlap_white_noise",
+        "gaussian_nonoverlap_random_direction",
     }
     assert DEFAULT_METHOD in METHODS
 
@@ -110,14 +113,20 @@ def test_unknown_method_falls_back_to_the_default():
     assert get_method("").id == DEFAULT_METHOD
 
 
-def test_only_our_variants_are_marked_non_canonical():
-    assert {m.id for m in METHODS.values() if not m.canonical} == OUR_IDS
+def test_every_canonical_method_has_an_ours_counterpart():
+    # Each of our variants names the canonical base it is built on in its engine's MRO.
+    for canonical_id in CANONICAL_IDS:
+        base = METHODS[canonical_id].engine
+        assert any(issubclass(METHODS[our_id].engine, base) for our_id in OUR_IDS), (
+            f"{canonical_id} has no non-overlapping counterpart"
+        )
+    assert len(OUR_IDS) == len(CANONICAL_IDS) == 4
 
 
 def test_list_methods_puts_canonical_ones_first():
     ordered = list_methods()
     assert len(ordered) == len(METHODS)
-    assert {m.id for m in ordered[-2:]} == OUR_IDS
+    assert {m.id for m in ordered[-len(OUR_IDS) :]} == OUR_IDS
     assert all(m.canonical for m in ordered[: -len(OUR_IDS)])
 
 
@@ -153,6 +162,14 @@ def test_our_brownian_variant_is_built_on_brownian():
     engine = build_engine(RDKParams(method="gaussian_nonoverlap_brownian"), RenderParams(seed=0))
     assert isinstance(engine, BrownianRDKEngine)
     assert engine.dot_life == 12
+
+
+@pytest.mark.parametrize("method_id", sorted(OUR_IDS))
+def test_our_variants_inherit_their_base_motion(method_id):
+    """Each variant must be a subclass of exactly the canonical engine it claims."""
+    engine = METHODS[method_id].engine
+    bases = [c for c in CANONICAL_IDS if issubclass(engine, METHODS[c].engine)]
+    assert len(bases) == 1, f"{method_id} maps to {bases}"
 
 
 @pytest.mark.parametrize("method_id", sorted(OUR_IDS))
