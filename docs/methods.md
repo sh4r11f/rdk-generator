@@ -187,6 +187,61 @@ Coherence values are **not** interchangeable across rows of that table, with one
 each of our variants is directly comparable to the canonical method it is built on, because
 it inherits that method's motion untouched.
 
+### Exactly what the mixin changes
+
+`GaussianNonOverlapMixin` in `core.py` overrides four hooks that `BaseRDKEngine` defines,
+and nothing else. It never touches `_move_noise`, so the host engine's motion is untouched
+by construction rather than by careful maintenance.
+
+**`_default_gauss_sigma`** returns `radius / 2`. The envelope machinery already lives in the
+base class — `compute_opacity` computes `alpha = exp(−r² / 2σ²)` for every engine — but the
+canonical methods return `None` from this hook, which sets σ to 0 and leaves every dot fully
+opaque. The mixin's only contribution here is supplying a width. `Envelope sigma` in the UI
+overrides it; 0 means "use the default".
+
+**`_initial_positions`** places dots by rejection sampling against the minimum separation
+rather than uniformly over the aperture, giving the field blue-noise statistics.
+
+**`_respawn`** applies the same constraint to every respawn, whatever caused it — dot death,
+an aperture exit, or white noise's per-frame relocation.
+
+**`step`** calls the host engine's step and then `_resolve_violations`, which replants dots
+that drifted too close *during* motion. Placement alone cannot prevent that.
+
+The policy inside `_resolve_violations` is the part worth knowing about. Replanting is a
+teleport, so which dot moves matters: displacing a dot that just carried the signal corrupts
+the motion. Early passes sacrifice noise dots by preference and only move a signal dot when
+its conflict cannot be cleared otherwise; a final pass moves everything still in conflict, so
+the separation guarantee always holds. On a crowded field that is worth zero signal loss
+where replanting every violator loses about 71%.
+
+If the requested density is unachievable, `_place` relaxes the separation and keeps whatever
+it managed, so later frames stay self-consistent instead of the sampler spinning.
+
+**Defaults.** Separation is 1.1 × dot size; envelope σ is a quarter of the field diameter.
+
+**Left alone.** The noise rule, signal selection and coherence, dot lifetime, aperture-exit
+handling, and luminance are all inherited untouched. That is why each variant's coherence is
+comparable to its own base — and only to its own base.
+
+**One knock-on.** On the random-direction variant a replanted dot passes through `_on_spawn`
+and so receives a **new heading** with its new position, exactly as an ordinary respawn does.
+Replanting therefore refreshes noise directions slightly there, which it does not on the
+other three.
+
+### What it buys, measured
+
+At 200 dots in a 200 px field with 3 px dots:
+
+| | Canonical | Ours |
+|---|---|---|
+| overlapping pairs per frame | ~18 | 0 |
+| dots distinctly visible | ~96% | 100% |
+| closest pair ever | 0.03–0.19 px | exactly the separation |
+
+The Diagnostics section reproduces this for any pair of methods; see
+[diagnostics.md](diagnostics.md).
+
 ## Checking a stimulus is what you think it is
 
 Every claim above is measurable, and [diagnostics.md](diagnostics.md) describes the tooling

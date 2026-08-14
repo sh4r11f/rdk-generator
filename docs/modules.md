@@ -48,7 +48,12 @@ For what the algorithms actually are and where they come from, see [methods.md](
     parameters that method accepts and filling in its canonical defaults.
   - `simulate`: runs the engine and returns per-frame dot positions and opacities without
     drawing anything. Backs the webapp's live preview.
-  - `render_frames` / `write_mp4` / `write_frames_zip`.
+  - `render_frames`, plus `video_bytes` / `frames_zip_bytes` which return bytes and
+    `write_mp4` / `write_frames_zip` which write them to a path — one implementation each,
+    so a served export and a local one cannot differ.
+  - `params_json`: the parameters as JSON, naming the method.
+  - `resolve_seed`: pins a concrete seed when none was given, so an export is reproducible
+    from its own metadata. See [exports.md](exports.md).
 
 - `rdk_generator/diagnostics.py`
   - `compute_diagnostics`: runs a stimulus and measures what it actually did — overlap and
@@ -56,6 +61,12 @@ For what the algorithms actually are and where they come from, see [methods.md](
     coherence delivery, and frame luminance. Pure NumPy.
   - `figure_png` / `write_diagnostics_png`: draw the eight-panel report. The only place
     matplotlib is used, imported lazily. See [diagnostics.md](diagnostics.md).
+
+- `rdk_generator/bundle.py`
+  - `everything_zip`: one archive holding the clip, its frames, its parameters and its
+    diagnostics. Lives apart from `export` and `diagnostics` because it draws on both.
+    Pins the seed before generating anything, so every file inside describes the same
+    stimulus rather than three unrelated ones.
 
 - `rdk_generator/webapp/app.py`
   - Flask app. `parse_form` coerces, clamps, and defaults submitted values against the
