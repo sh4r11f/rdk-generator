@@ -209,3 +209,8 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 .vercel
+
+# Dropped in by the Vercel CLI; this is a Python project.
+node_modules/
+package.json
+package-lock.json
