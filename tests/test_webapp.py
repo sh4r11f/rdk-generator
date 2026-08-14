@@ -350,3 +350,45 @@ def test_diagnostics_png_is_downloadable(client):
     r = client.get(diag)
     assert r.status_code == 200
     assert r.data[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_diagnostics_zip_endpoint_returns_a_downloadable_bundle(client):
+    import io
+    import zipfile
+
+    r = client.post(
+        "/api/diagnostics.zip",
+        data={
+            "method": "brownian",
+            "n_dots": "40",
+            "duration_s": "0.2",
+            "width_px": "120",
+            "height_px": "120",
+        },
+    )
+    assert r.status_code == 200
+    assert r.mimetype == "application/zip"
+    assert "attachment" in r.headers["Content-Disposition"]
+    assert "rdk-diagnostics-brownian.zip" in r.headers["Content-Disposition"]
+
+    with zipfile.ZipFile(io.BytesIO(r.data)) as archive:
+        assert archive.testzip() is None
+        names = archive.namelist()
+        assert "diagnostics.pdf" in names
+        assert sum(1 for n in names if n.startswith("panels/")) == 16
+
+
+def test_diagnostics_zip_writes_nothing_to_disk(client, tmp_path):
+    outputs = tmp_path / "outputs"
+    before = set(outputs.iterdir())
+    client.post(
+        "/api/diagnostics.zip",
+        data={
+            "method": "brownian",
+            "n_dots": "40",
+            "duration_s": "0.2",
+            "width_px": "120",
+            "height_px": "120",
+        },
+    )
+    assert set(outputs.iterdir()) == before

@@ -12,6 +12,8 @@ This repo provides:
 - **Diagnostics** that measure what a stimulus actually did rather than what it was asked
   for — dot overlap and effective dot count, the step-size and direction signatures of each
   noise rule, radial density, coherence delivery, and luminance flicker.
+  Downloadable as publication-quality figures (vector PDF plus high-resolution PNG,
+  every panel separately) with the underlying numbers as CSV.
   See [docs/diagnostics.md](docs/diagnostics.md).
 - A small **Flask webapp** with a **live preview**: pick a method from the menu bar, and
   the stimulus re-simulates as you edit its parameters — no button to press. Each method

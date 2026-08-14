@@ -98,6 +98,39 @@ crossing the rim respawn uniformly across the *whole* aperture, so the edge annu
 continuously drained. It is a real consequence of the uniform-respawn convention, and
 wraparound would not show it.
 
+## Getting the figures out
+
+**Download figures** in the Diagnostics section builds a bundle for publication use:
+
+```
+diagnostics.png            combined report, 300 dpi
+diagnostics.pdf            the same, as vector
+panels/01_spacing.png      each panel on its own, high-resolution PNG...
+panels/01_spacing.pdf      ...and as vector PDF, for dropping into a paper
+data/per_frame.csv         the per-frame series behind the time plots
+data/radial_density.csv    the radial density profile
+data/summary.json          the headline numbers
+data/params.json           the parameters that produced this stimulus
+README.txt                 what is in the bundle, and the measurement window
+```
+
+Panels are drawn by the same code whether they appear in the combined report or on their
+own, so the two cannot disagree. The CSVs are there so you can redraw any panel in your own
+house style rather than being stuck with ours, and `params.json` makes the figure
+reproducible.
+
+From Python:
+
+```python
+from rdk_generator.diagnostics import compute_diagnostics, figures_zip, panel_bytes
+
+diag = compute_diagnostics(rdk, render)
+open("bundle.zip", "wb").write(figures_zip(diag, dpi=300, rdk=rdk, render=render))
+open("spacing.pdf", "wb").write(panel_bytes(diag, "spacing", fmt="pdf"))
+```
+
+`write_figures_zip(path, rdk=..., render=...)` does the measure-and-write in one call.
+
 ## Using it
 
 ```python

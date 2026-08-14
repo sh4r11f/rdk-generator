@@ -350,11 +350,14 @@
             <div class="card-head">
               <p class="section-title">Diagnostics</p>
               <span class="grow"></span>
+              <button class="ghost" id="diag-zip" type="button">Download figures</button>
               <button class="ghost" id="diag-run" type="button">Measure stimulus</button>
             </div>
             <p class="diag-hint" id="diag-hint">
               Measures what the stimulus actually did &mdash; overlap, step sizes, density,
               coherence delivery and luminance. Takes about a second, so it runs on demand.
+              <b>Download figures</b> bundles every panel as a high-resolution PNG and vector
+              PDF, with the underlying numbers as CSV.
             </p>
             <div id="diag-panel" hidden>
               <div class="metrics" id="diag-metrics"></div>
@@ -673,6 +676,33 @@
       }
 
       diagBtn.addEventListener("click", runDiagnostics);
+
+      const zipBtn = document.getElementById("diag-zip");
+      zipBtn.addEventListener("click", async () => {
+        zipBtn.disabled = true;
+        zipBtn.textContent = "Building\u2026";
+        try {
+          const res = await fetch("/api/diagnostics.zip", {
+            method: "POST",
+            body: new FormData(form),
+          });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const blob = await res.blob();
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement("a");
+          link.href = url;
+          link.download = `rdk-diagnostics-${currentId}.zip`;
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+          URL.revokeObjectURL(url);
+        } catch (err) {
+          diagHint.textContent = "Could not build the figure bundle.";
+        } finally {
+          zipBtn.disabled = false;
+          zipBtn.textContent = "Download figures";
+        }
+      });
 
       /* ---------------- wiring ---------------- */
 

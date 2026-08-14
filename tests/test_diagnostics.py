@@ -310,3 +310,113 @@ def test_radial_density_is_flat_except_at_the_rim():
     profile = diag.radial_density / diag.radial_density.mean()
     assert profile[:-1].std() < 0.03, "interior must be flat"
     assert profile[-1] < 0.97, "exit-respawn should visibly deplete the outer ring"
+
+
+# --- figure bundle -----------------------------------------------------------
+
+
+def test_panel_keys_match_the_guide():
+    """The report and its explanations are keyed identically, so they cannot drift."""
+    from rdk_generator.diagnostics import DIAGNOSTIC_GUIDE, PANEL_KEYS
+
+    assert PANEL_KEYS == tuple(d.key for d in DIAGNOSTIC_GUIDE)
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "spacing",
+        "occlusion",
+        "step_size",
+        "direction",
+        "density",
+        "relocations",
+        "coherence",
+        "luminance",
+    ],
+)
+def test_each_panel_renders_on_its_own(key):
+    from rdk_generator.diagnostics import panel_bytes
+
+    png = panel_bytes(measure("brownian", n_dots=60), key, dpi=60)
+    assert png[:8] == b"\x89PNG\r\n\x1a\n"
+    assert len(png) > 5_000
+
+
+def test_unknown_panel_is_rejected():
+    from rdk_generator.diagnostics import panel_bytes
+
+    with pytest.raises(KeyError, match="unknown panel"):
+        panel_bytes(measure("brownian", n_dots=40), "not-a-panel")
+
+
+def test_figure_renders_as_vector_too():
+    from rdk_generator.diagnostics import figure_bytes
+
+    pdf = figure_bytes(measure("brownian", n_dots=60), fmt="pdf")
+    assert pdf[:5] == b"%PDF-"
+
+
+def test_figures_zip_contains_every_figure_and_the_numbers():
+    import io
+    import json
+    import zipfile
+
+    from rdk_generator.diagnostics import PANEL_KEYS, figures_zip
+
+    rdk = RDKParams(method="gaussian_nonoverlap", n_dots=80, field_diam_px=150)
+    diag = compute_diagnostics(rdk, RENDER, max_frames=10)
+    blob = figures_zip(diag, dpi=80, rdk=rdk, render=RENDER)
+
+    with zipfile.ZipFile(io.BytesIO(blob)) as archive:
+        assert archive.testzip() is None
+        names = set(archive.namelist())
+
+        assert {"diagnostics.png", "diagnostics.pdf", "README.txt"} <= names
+        for index, key in enumerate(PANEL_KEYS, start=1):
+            assert f"panels/{index:02d}_{key}.png" in names
+            assert f"panels/{index:02d}_{key}.pdf" in names
+
+        assert archive.read("diagnostics.png")[:8] == b"\x89PNG\r\n\x1a\n"
+        assert archive.read("diagnostics.pdf")[:5] == b"%PDF-"
+        assert archive.read("panels/01_spacing.pdf")[:5] == b"%PDF-"
+
+        summary = json.loads(archive.read("data/summary.json"))
+        assert summary["method"] == "gaussian_nonoverlap"
+
+        params = json.loads(archive.read("data/params.json"))
+        assert params["rdk"]["method"] == "gaussian_nonoverlap"
+        assert params["render"]["seed"] == RENDER.seed
+
+        rows = archive.read("data/per_frame.csv").decode().strip().splitlines()
+        assert rows[0].startswith("frame,overlapping_pairs")
+        assert len(rows) == diag.n_frames + 1
+
+        radial = archive.read("data/radial_density.csv").decode().strip().splitlines()
+        assert len(radial) == len(diag.radial_density) + 1
+
+
+def test_figures_zip_works_without_params():
+    import io
+    import zipfile
+
+    from rdk_generator.diagnostics import figures_zip
+
+    blob = figures_zip(measure("brownian", n_dots=40), dpi=60)
+    with zipfile.ZipFile(io.BytesIO(blob)) as archive:
+        assert "data/params.json" not in archive.namelist()
+        assert "diagnostics.png" in archive.namelist()
+
+
+def test_write_figures_zip_creates_the_file(tmp_path):
+    from rdk_generator.diagnostics import write_figures_zip
+
+    out = write_figures_zip(
+        tmp_path / "bundle" / "figures.zip",
+        rdk=RDKParams(method="brownian", n_dots=40),
+        render=RENDER,
+        dpi=60,
+        max_frames=6,
+    )
+    assert out.exists()
+    assert out.read_bytes()[:2] == b"PK"

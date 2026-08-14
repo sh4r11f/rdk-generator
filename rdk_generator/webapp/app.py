@@ -24,6 +24,7 @@ from flask import (
 from ..diagnostics import (
     compute_diagnostics,
     figure_png,
+    figures_zip,
     guide_payload,
     write_diagnostics_png,
 )
@@ -233,6 +234,24 @@ def create_app(*, instance_path: str | None = None) -> Flask:
                 "notes": list(diag.notes),
                 "png": base64.b64encode(figure_png(diag)).decode("ascii"),
             }
+        )
+
+    @app.post("/api/diagnostics.zip")
+    def api_diagnostics_zip() -> Response:
+        """Publication-quality figure bundle for the current parameters.
+
+        Streamed straight back rather than written to `outputs/`: this is a download, not
+        an export artifact, and it should not accumulate on disk.
+        """
+        rdk, render, _ = parse_form(request.form)
+        diag = compute_diagnostics(rdk, render)
+        blob = figures_zip(diag, rdk=rdk, render=render)
+        return Response(
+            blob,
+            mimetype="application/zip",
+            headers={
+                "Content-Disposition": f'attachment; filename="rdk-diagnostics-{rdk.method}.zip"'
+            },
         )
 
     @app.post("/generate")

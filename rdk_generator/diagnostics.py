@@ -309,39 +309,37 @@ def _hist(ax, data: np.ndarray, *, bins: int = 60, **kwargs) -> None:
     ax.hist(data, bins=bins, range=(low, high), **kwargs)
 
 
-def figure_png(diag: Diagnostics, *, dpi: int = 110) -> bytes:
-    """Render the diagnostic panel as PNG bytes.
+def _style_axes(ax, *, polar: bool = False) -> None:
+    ax.set_facecolor(_BG)
+    ax.tick_params(colors=_MUTED, labelsize=8)
+    ax.grid(alpha=0.12 if not polar else 0.15, color=_MUTED, linewidth=0.6)
+    ax.set_axisbelow(True)
+    if polar:
+        return
+    for spine in ("top", "right"):
+        ax.spines[spine].set_visible(False)
+    for spine in ("left", "bottom"):
+        ax.spines[spine].set_color(_FAINT)
 
-    Imported lazily so the headless generator keeps working without matplotlib.
-    """
-    import matplotlib
 
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
+def _set_title(ax, text: str, sub: str = "", *, polar: bool = False) -> None:
+    if polar:
+        ax.set_title(f"{text}\n{sub}" if sub else text, color=_INK, fontsize=10.5, pad=16)
+        return
+    ax.set_title(text, color=_INK, fontsize=10.5, loc="left", pad=25 if sub else 10)
+    if sub:
+        ax.text(0, 1.015, sub, transform=ax.transAxes, color=_FAINT, fontsize=8, va="bottom")
 
-    fig, axes = plt.subplots(4, 2, figsize=(11, 13), facecolor=_BG)
-    fig.subplots_adjust(hspace=0.68, wspace=0.30, top=0.895, bottom=0.05, left=0.09, right=0.96)
 
-    for ax in axes.flat:
-        ax.set_facecolor(_BG)
-        for spine in ("top", "right"):
-            ax.spines[spine].set_visible(False)
-        for spine in ("left", "bottom"):
-            ax.spines[spine].set_color(_FAINT)
-        ax.tick_params(colors=_MUTED, labelsize=8)
-        ax.grid(alpha=0.12, color=_MUTED, linewidth=0.6)
-        ax.set_axisbelow(True)
+def _legend(ax) -> None:
+    ax.legend(fontsize=7.5, frameon=False, labelcolor=_MUTED)
 
-    def title(ax, text, sub=""):
-        ax.set_title(text, color=_INK, fontsize=10.5, loc="left", pad=25 if sub else 10)
-        if sub:
-            ax.text(0, 1.015, sub, transform=ax.transAxes, color=_FAINT, fontsize=8, va="bottom")
 
-    frames = np.arange(diag.n_frames)
-    s = diag.summary()
+# Each panel draws itself onto a single axes, so the combined report and the
+# individually exported figures come from exactly the same code.
 
-    # 1. Nearest-neighbour distances: where overlap comes from.
-    ax = axes[0, 0]
+
+def _panel_spacing(ax, diag: Diagnostics, s: dict) -> None:
     _hist(ax, diag.nn_distances, color=_ACCENT, alpha=0.85)
     ax.axvline(
         diag.dot_size_px, color=_ALERT, lw=1.3, ls="--", label=f"dot size {diag.dot_size_px:g}px"
@@ -352,11 +350,12 @@ def figure_png(diag: Diagnostics, *, dpi: int = 110) -> bytes:
         )
     ax.set_xlabel("nearest-neighbour distance (px)", color=_MUTED, fontsize=9)
     ax.set_ylabel("dot-frames", color=_MUTED, fontsize=9)
-    ax.legend(fontsize=7.5, frameon=False, labelcolor=_MUTED)
-    title(ax, "Dot spacing", "anything left of the dashed line is an overlap")
+    _legend(ax)
+    _set_title(ax, "Dot spacing", "anything left of the dashed line is an overlap")
 
-    # 2. Overlap over time.
-    ax = axes[0, 1]
+
+def _panel_occlusion(ax, diag: Diagnostics, s: dict) -> None:
+    frames = np.arange(diag.n_frames)
     ax.plot(frames, diag.overlap_pairs, color=_ALERT, lw=1.3, label="overlapping pairs")
     ax.plot(frames, diag.occluded_dots, color=_ACCENT, lw=1.3, label="mostly-hidden dots")
     ax.set_xlabel("frame", color=_MUTED, fontsize=9)
@@ -375,15 +374,15 @@ def figure_png(diag: Diagnostics, *, dpi: int = 110) -> bytes:
         )
     else:
         ax.set_ylim(bottom=0)
-    ax.legend(fontsize=7.5, frameon=False, labelcolor=_MUTED)
-    title(
+    _legend(ax)
+    _set_title(
         ax,
         "Occlusion over time",
         f"{s['visible_dot_fraction'] * 100:.1f}% of dots distinctly visible",
     )
 
-    # 3. Step magnitude: the noise rule's fingerprint.
-    ax = axes[1, 0]
+
+def _panel_step_size(ax, diag: Diagnostics, s: dict) -> None:
     _hist(ax, diag.step_magnitudes, color=_ACCENT, alpha=0.85)
     ax.axvline(
         diag.expected_step_px,
@@ -394,13 +393,11 @@ def figure_png(diag: Diagnostics, *, dpi: int = 110) -> bytes:
     )
     ax.set_xlabel("displacement per frame (px)", color=_MUTED, fontsize=9)
     ax.set_ylabel("dot-frames", color=_MUTED, fontsize=9)
-    ax.legend(fontsize=7.5, frameon=False, labelcolor=_MUTED)
-    title(ax, "Step size", "relocations excluded; speed-matched noise sits on the line")
+    _legend(ax)
+    _set_title(ax, "Step size", "relocations excluded; speed-matched noise sits on the line")
 
-    # 4. Step direction.
-    ax = axes[1, 1]
-    ax.remove()
-    ax = fig.add_subplot(4, 2, 4, projection="polar", facecolor=_BG)
+
+def _panel_direction(ax, diag: Diagnostics, s: dict) -> None:
     if diag.step_angles_deg.size:
         counts, edges = np.histogram(
             np.radians(diag.step_angles_deg % 360), bins=36, range=(0, 2 * np.pi)
@@ -415,17 +412,10 @@ def figure_png(diag: Diagnostics, *, dpi: int = 110) -> bytes:
             edgecolor=_BG,
             linewidth=0.5,
         )
-    ax.tick_params(colors=_MUTED, labelsize=7.5)
-    ax.grid(alpha=0.15, color=_MUTED)
-    ax.set_title(
-        "Step direction\na spike on the signal, a pedestal of noise",
-        color=_INK,
-        fontsize=10.5,
-        pad=14,
-    )
+    _set_title(ax, "Step direction", "a spike on the signal, a pedestal of noise", polar=True)
 
-    # 5. Radial density: uniform-over-area sampling, and the envelope.
-    ax = axes[2, 0]
+
+def _panel_density(ax, diag: Diagnostics, s: dict) -> None:
     centres = 0.5 * (diag.radial_edges[:-1] + diag.radial_edges[1:])
     ax.plot(centres, diag.radial_density, color=_ACCENT, lw=1.5, label="dot density")
     ax.plot(
@@ -437,23 +427,24 @@ def figure_png(diag: Diagnostics, *, dpi: int = 110) -> bytes:
         label="weighted by opacity",
     )
     ax.set_xlabel("distance from centre (px)", color=_MUTED, fontsize=9)
-    ax.set_ylabel("dots / px²", color=_MUTED, fontsize=9)
-    ax.legend(fontsize=7.5, frameon=False, labelcolor=_MUTED)
-    title(ax, "Radial density", "flat = uniform over area; the dashed line shows the envelope")
+    ax.set_ylabel("dots / px\u00b2", color=_MUTED, fontsize=9)
+    _legend(ax)
+    _set_title(ax, "Radial density", "flat = uniform over area; the dashed line shows the envelope")
 
-    # 6. Relocations: how much of the field is teleporting.
-    ax = axes[2, 1]
-    ax.plot(frames, diag.relocations, color=_ACCENT, lw=1.3)
+
+def _panel_relocations(ax, diag: Diagnostics, s: dict) -> None:
+    ax.plot(np.arange(diag.n_frames), diag.relocations, color=_ACCENT, lw=1.3)
     ax.set_xlabel("frame", color=_MUTED, fontsize=9)
     ax.set_ylabel("dots relocated", color=_MUTED, fontsize=9)
-    title(
+    _set_title(
         ax,
         "Relocations per frame",
         f"{s['relocations_per_frame']:.1f} of {diag.n_dots} dots on average",
     )
 
-    # 7. Coherence: asked for, delivered, and survived.
-    ax = axes[3, 0]
+
+def _panel_coherence(ax, diag: Diagnostics, s: dict) -> None:
+    frames = np.arange(diag.n_frames)
     ax.plot(frames, diag.signal_fraction, color=_ACCENT, lw=1.3, label="flagged as signal")
     ax.plot(frames, diag.signal_delivered, color=_SIGNAL, lw=1.3, label="delivered a coherent step")
     ax.plot(frames, diag.lost_to_replanting, color=_ALERT, lw=1.3, label="lost to replanting")
@@ -467,35 +458,194 @@ def figure_png(diag: Diagnostics, *, dpi: int = 110) -> bytes:
     ax.set_ylim(-0.05, 1.08)
     ax.set_xlabel("frame", color=_MUTED, fontsize=9)
     ax.set_ylabel("fraction of signal dots", color=_MUTED, fontsize=9)
-    ax.legend(fontsize=7.5, frameon=False, labelcolor=_MUTED)
-    title(
+    _legend(ax)
+    _set_title(
         ax,
         "Coherence delivery",
         f"{s['lost_to_lifecycle'] * 100:.0f}% lost to dot life / aperture exits (by design)",
     )
 
-    # 8. Luminance: is there a flicker confound?
-    ax = axes[3, 1]
-    ax.plot(frames, diag.mean_luminance, color=_ACCENT, lw=1.3, label="frame mean")
+
+def _panel_luminance(ax, diag: Diagnostics, s: dict) -> None:
+    ax.plot(
+        np.arange(diag.n_frames), diag.mean_luminance, color=_ACCENT, lw=1.3, label="frame mean"
+    )
     ax.axhline(diag.background_lum, color=_SIGNAL, lw=1.0, ls="--", label="background")
     ax.set_xlabel("frame", color=_MUTED, fontsize=9)
     ax.set_ylabel("mean luminance", color=_MUTED, fontsize=9)
-    ax.legend(fontsize=7.5, frameon=False, labelcolor=_MUTED)
-    title(ax, "Frame luminance", f"SD {s['luminance_sd']:.4f} — flat means no flicker cue")
-
-    header = (
-        f"{diag.method}  ·  {diag.n_dots} dots  ·  {diag.n_frames} frames  ·  "
-        f"coherence {diag.nominal_coherence:g}"
+    _legend(ax)
+    _set_title(
+        ax, "Frame luminance", f"SD {s['luminance_sd']:.4f} \u2014 flat means no flicker cue"
     )
-    fig.suptitle(header, color=_INK, fontsize=13, y=0.968, x=0.09, ha="left")
-    if diag.notes:
-        fig.text(0.09, 0.945, "  ".join(diag.notes), color=_FAINT, fontsize=8.5, ha="left")
 
+
+# Keys match `DIAGNOSTIC_GUIDE`, so the report and its explanations cannot drift apart.
+PANELS: tuple[tuple[str, str, object, bool], ...] = (
+    ("spacing", "Dot spacing", _panel_spacing, False),
+    ("occlusion", "Occlusion over time", _panel_occlusion, False),
+    ("step_size", "Step size", _panel_step_size, False),
+    ("direction", "Step direction", _panel_direction, True),
+    ("density", "Radial density", _panel_density, False),
+    ("relocations", "Relocations per frame", _panel_relocations, False),
+    ("coherence", "Coherence delivery", _panel_coherence, False),
+    ("luminance", "Frame luminance", _panel_luminance, False),
+)
+
+PANEL_KEYS: tuple[str, ...] = tuple(key for key, _, _, _ in PANELS)
+
+
+def _pyplot():
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    return plt
+
+
+def _render(fig, plt, fmt: str, dpi: int) -> bytes:
     from io import BytesIO
 
     buf = BytesIO()
-    fig.savefig(buf, format="png", dpi=dpi, facecolor=_BG)
+    fig.savefig(buf, format=fmt, dpi=dpi, facecolor=_BG)
     plt.close(fig)
+    return buf.getvalue()
+
+
+def _header(diag: Diagnostics) -> str:
+    return (
+        f"{diag.method}  \u00b7  {diag.n_dots} dots  \u00b7  {diag.n_frames} frames  \u00b7  "
+        f"coherence {diag.nominal_coherence:g}"
+    )
+
+
+def figure_bytes(diag: Diagnostics, *, fmt: str = "png", dpi: int = 110) -> bytes:
+    """Render the full eight-panel report. `fmt` may be png, pdf or svg.
+
+    matplotlib is imported lazily so the headless generator works without it.
+    """
+    plt = _pyplot()
+    summary = diag.summary()
+
+    fig = plt.figure(figsize=(11, 13), facecolor=_BG)
+    fig.subplots_adjust(hspace=0.68, wspace=0.30, top=0.895, bottom=0.05, left=0.09, right=0.96)
+
+    for i, (_key, _title, draw, polar) in enumerate(PANELS):
+        ax = fig.add_subplot(4, 2, i + 1, projection="polar" if polar else None)
+        _style_axes(ax, polar=polar)
+        draw(ax, diag, summary)
+
+    fig.suptitle(_header(diag), color=_INK, fontsize=13, y=0.968, x=0.09, ha="left")
+    if diag.notes:
+        fig.text(0.09, 0.945, "  ".join(diag.notes), color=_FAINT, fontsize=8.5, ha="left")
+    return _render(fig, plt, fmt, dpi)
+
+
+def figure_png(diag: Diagnostics, *, dpi: int = 110) -> bytes:
+    """Render the full report as PNG bytes."""
+    return figure_bytes(diag, fmt="png", dpi=dpi)
+
+
+def panel_bytes(diag: Diagnostics, key: str, *, fmt: str = "png", dpi: int = 200) -> bytes:
+    """Render one panel on its own, sized for dropping into a paper or slide."""
+    match = [p for p in PANELS if p[0] == key]
+    if not match:
+        raise KeyError(f"unknown panel {key!r}; expected one of {PANEL_KEYS}")
+    _key, _title, draw, polar = match[0]
+
+    plt = _pyplot()
+    fig = plt.figure(figsize=(6.4, 5.0) if polar else (6.8, 4.6), facecolor=_BG)
+    ax = fig.add_subplot(111, projection="polar" if polar else None)
+    _style_axes(ax, polar=polar)
+    draw(ax, diag, diag.summary())
+    fig.text(0.02, 0.015, _header(diag), color=_FAINT, fontsize=7, ha="left")
+    fig.tight_layout(rect=(0, 0.03, 1, 1))
+    return _render(fig, plt, fmt, dpi)
+
+
+def _per_frame_csv(diag: Diagnostics) -> str:
+    columns = {
+        "frame": np.arange(diag.n_frames),
+        "overlapping_pairs": diag.overlap_pairs,
+        "occluded_dots": diag.occluded_dots,
+        "relocations": diag.relocations,
+        "signal_fraction": diag.signal_fraction,
+        "signal_delivered": diag.signal_delivered,
+        "lost_to_lifecycle": diag.lost_to_lifecycle,
+        "lost_to_replanting": diag.lost_to_replanting,
+        "mean_luminance": diag.mean_luminance,
+    }
+    lines = [",".join(columns)]
+    for i in range(diag.n_frames):
+        lines.append(",".join(f"{columns[c][i]:.6g}" for c in columns))
+    return "\n".join(lines) + "\n"
+
+
+def _radial_csv(diag: Diagnostics) -> str:
+    edges = diag.radial_edges
+    lines = ["ring_inner_px,ring_outer_px,density_dots_per_px2,density_weighted_by_opacity"]
+    for i in range(len(diag.radial_density)):
+        lines.append(
+            f"{edges[i]:.6g},{edges[i + 1]:.6g},"
+            f"{diag.radial_density[i]:.6g},{diag.radial_density_weighted[i]:.6g}"
+        )
+    return "\n".join(lines) + "\n"
+
+
+def figures_zip(
+    diag: Diagnostics,
+    *,
+    dpi: int = 300,
+    rdk: RDKParams | None = None,
+    render: RenderParams | None = None,
+) -> bytes:
+    """Bundle publication-quality figures and the numbers behind them.
+
+    Contains the combined report and every panel separately, each as a high-resolution
+    PNG and as vector PDF, plus the measured series as CSV so the figures can be redrawn
+    in another style, and the parameters that produced them.
+    """
+    import json
+    import zipfile
+    from dataclasses import asdict
+    from io import BytesIO
+
+    buf = BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("diagnostics.png", figure_bytes(diag, fmt="png", dpi=dpi))
+        archive.writestr("diagnostics.pdf", figure_bytes(diag, fmt="pdf"))
+
+        for index, (key, _title, _draw, _polar) in enumerate(PANELS, start=1):
+            archive.writestr(
+                f"panels/{index:02d}_{key}.png", panel_bytes(diag, key, fmt="png", dpi=dpi)
+            )
+            archive.writestr(f"panels/{index:02d}_{key}.pdf", panel_bytes(diag, key, fmt="pdf"))
+
+        archive.writestr("data/per_frame.csv", _per_frame_csv(diag))
+        archive.writestr("data/radial_density.csv", _radial_csv(diag))
+        archive.writestr("data/summary.json", json.dumps(diag.summary(), indent=2))
+        if rdk is not None and render is not None:
+            archive.writestr(
+                "data/params.json",
+                json.dumps({"rdk": asdict(rdk), "render": asdict(render)}, indent=2),
+            )
+
+        notes = " ".join(diag.notes) or "The whole clip was measured."
+        archive.writestr(
+            "README.txt",
+            "RDK stimulus diagnostics\n"
+            "========================\n\n"
+            f"{_header(diag)}\n\n"
+            f"{notes}\n\n"
+            f"diagnostics.png   combined report, {dpi} dpi\n"
+            "diagnostics.pdf   the same, as vector\n"
+            "panels/           each panel separately, PNG and vector PDF\n"
+            "data/per_frame.csv       the per-frame series behind the time plots\n"
+            "data/radial_density.csv  the radial density profile\n"
+            "data/summary.json        the headline numbers\n"
+            "data/params.json         the parameters that produced this stimulus\n\n"
+            "See docs/diagnostics.md for what each panel measures and how it was validated.\n",
+        )
     return buf.getvalue()
 
 
@@ -513,6 +663,24 @@ def write_diagnostics_png(
     out_path.parent.mkdir(parents=True, exist_ok=True)
     diag = compute_diagnostics(rdk, render, max_frames=max_frames)
     out_path.write_bytes(figure_png(diag))
+    return out_path
+
+
+def write_figures_zip(
+    out_path,
+    *,
+    rdk: RDKParams,
+    render: RenderParams,
+    dpi: int = 300,
+    max_frames: int | None = DEFAULT_MAX_FRAMES,
+):
+    """Measure a stimulus and write the full figure bundle."""
+    from pathlib import Path
+
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    diag = compute_diagnostics(rdk, render, max_frames=max_frames)
+    out_path.write_bytes(figures_zip(diag, dpi=dpi, rdk=rdk, render=render))
     return out_path
 
 
