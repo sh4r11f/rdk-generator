@@ -37,6 +37,12 @@ _AUTO_WHEN_ZERO = ("gauss_sigma_px", "min_sep_px")
 # Long clips are truncated for the preview only; exports always use the full duration.
 PREVIEW_MAX_FRAMES = 150
 
+# Vercel caps a function response body at 4.5 MB. Exports are streamed in the response, so
+# a long or high-resolution clip can exceed it. Enforced only when actually running there,
+# where it turns an opaque platform 413 into an actionable message; a normal server has no
+# such limit and is left alone.
+VERCEL_RESPONSE_LIMIT = 4_400_000
+
 
 def _pack(array) -> str:
     """Encode an array as little-endian float32 base64, for the browser to decode."""
@@ -142,6 +148,21 @@ def create_app(*, instance_path: str | None = None) -> Flask:
             session.pop("saved_params", None)
 
     def _download(blob: bytes, mimetype: str, filename: str) -> Response:
+        if os.environ.get("VERCEL") and len(blob) > VERCEL_RESPONSE_LIMIT:
+            megabytes = len(blob) / 1e6
+            return (
+                jsonify(
+                    {
+                        "error": (
+                            f"This export is {megabytes:.1f} MB, over the 4.5 MB response "
+                            "limit this deployment can return. Shorten the clip, lower the "
+                            "frame rate, or reduce the width and height — or render it "
+                            "locally with the library, which has no such limit."
+                        )
+                    }
+                ),
+                413,
+            )
         return Response(
             blob,
             mimetype=mimetype,

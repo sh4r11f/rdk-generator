@@ -274,3 +274,30 @@ def test_diagnostics_zip_endpoint_returns_a_downloadable_bundle(client):
         names = archive.namelist()
         assert "diagnostics.pdf" in names
         assert sum(1 for n in names if n.startswith("panels/")) == 16
+
+
+# --- serverless response-size guard ------------------------------------------
+
+
+def test_oversized_export_is_refused_with_an_explanation_on_vercel(client, monkeypatch):
+    """Vercel caps a response body at 4.5 MB; say so instead of failing opaquely."""
+    from rdk_generator.webapp import app as app_mod
+
+    monkeypatch.setenv("VERCEL", "1")
+    monkeypatch.setattr(app_mod, "VERCEL_RESPONSE_LIMIT", 1_000)
+
+    r = client.post("/export/frames.zip", data=form())
+    assert r.status_code == 413
+    message = r.get_json()["error"]
+    assert "4.5 MB" in message
+    assert "Shorten the clip" in message
+
+
+def test_the_size_guard_only_applies_on_vercel(client, monkeypatch):
+    from rdk_generator.webapp import app as app_mod
+
+    monkeypatch.delenv("VERCEL", raising=False)
+    monkeypatch.setattr(app_mod, "VERCEL_RESPONSE_LIMIT", 1_000)
+
+    # A normal server streams whatever it likes.
+    assert client.post("/export/frames.zip", data=form()).status_code == 200

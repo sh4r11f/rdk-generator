@@ -685,7 +685,16 @@
         button.textContent = "Rendering\u2026";
         try {
           const res = await fetch(endpoint, { method: "POST", body: new FormData(form) });
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          if (!res.ok) {
+            // The server explains size limits in the body; show that rather than a code.
+            const detail = await res.json().catch(() => null);
+            if (detail && detail.error) {
+              diagHint.textContent = detail.error;
+              setStatus("error", "export too large");
+              return;
+            }
+            throw new Error(`HTTP ${res.status}`);
+          }
           const blob = await res.blob();
           // The server already names each export distinctly; only fall back if it did not.
           const disposition = res.headers.get("Content-Disposition") || "";
