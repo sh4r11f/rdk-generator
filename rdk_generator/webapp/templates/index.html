@@ -197,6 +197,30 @@
       .slider-row { display: grid; grid-template-columns: 1fr 74px; gap: 10px; align-items: center; }
       input[type="range"] { width: 100%; accent-color: var(--accent); cursor: pointer; }
 
+      /* ---------- diagnostics ---------- */
+      .card-head { display: flex; align-items: center; gap: 14px; margin-bottom: 4px; }
+      .card-head .section-title { margin: 0; }
+      .metrics {
+        display: grid; grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+        gap: 11px; margin: 18px 0 4px;
+      }
+      .metric {
+        border: 1px solid var(--border); border-radius: 9px; padding: 11px 13px;
+        background: rgba(236, 231, 223, 0.022);
+      }
+      .metric .k {
+        font-size: 11px; text-transform: uppercase; letter-spacing: 0.09em;
+        color: var(--faint); font-weight: 640;
+      }
+      .metric .v {
+        font-family: var(--mono); font-size: 18px; color: var(--text); margin-top: 4px;
+      }
+      .metric.good .v { color: var(--ok); }
+      .metric.bad .v { color: var(--bad); }
+      #diag-figure { width: 100%; border-radius: 8px; margin-top: 18px; display: block; }
+      #diag-panel[data-stale="true"] { opacity: 0.45; }
+      .diag-hint { font-size: 13px; color: var(--faint); margin: 4px 0 0; }
+
       /* ---------- docs ---------- */
       .doc-title {
         font-family: var(--serif); font-size: 24px; font-weight: 600;
@@ -257,10 +281,27 @@
               <div class="links">
                 <a href="{{ mp4_url }}">Download .mp4</a>
                 <a href="{{ zip_url }}">Frames (.zip)</a>
+                {% if diag_url %}<a href="{{ diag_url }}">Diagnostics (.png)</a>{% endif %}
                 <a href="/meta/{{ job_id }}">Params (.json)</a>
                 {% if preview_method %}<span class="pill">last export: {{ preview_method }}</span>{% endif %}
               </div>
             {% endif %}
+          </section>
+
+          <section class="card">
+            <div class="card-head">
+              <p class="section-title">Diagnostics</p>
+              <span class="grow"></span>
+              <button class="ghost" id="diag-run" type="button">Measure stimulus</button>
+            </div>
+            <p class="diag-hint" id="diag-hint">
+              Measures what the stimulus actually did &mdash; overlap, step sizes, density,
+              coherence delivery and luminance. Takes about a second, so it runs on demand.
+            </p>
+            <div id="diag-panel" hidden>
+              <div class="metrics" id="diag-metrics"></div>
+              <img id="diag-figure" alt="Diagnostic plots for the current stimulus" />
+            </div>
           </section>
 
           <section class="card doc" id="doc"></section>
@@ -482,6 +523,65 @@
         requestAnimationFrame(loop);
       }
 
+      /* ---------------- diagnostics ---------------- */
+
+      const diagBtn = document.getElementById("diag-run");
+      const diagPanel = document.getElementById("diag-panel");
+      const diagHint = document.getElementById("diag-hint");
+      let diagLoaded = false;
+
+      const pct = (x) => `${(x * 100).toFixed(1)}%`;
+
+      function metricsHtml(s) {
+        const overlapping = s.overlapping_pairs_per_frame;
+        const replanted = s.lost_to_replanting;
+        const cells = [
+          ["overlapping pairs", overlapping.toFixed(1), overlapping < 0.05 ? "good" : ""],
+          ["dots visible", pct(s.visible_dot_fraction), s.visible_dot_fraction > 0.999 ? "good" : ""],
+          ["closest pair", `${s.min_nn_distance_px.toFixed(2)}px`, ""],
+          ["signal delivered", pct(s.signal_delivered), ""],
+          ["lost to replanting", pct(replanted), replanted > 0.01 ? "bad" : "good"],
+          ["luminance SD", s.luminance_sd.toFixed(4), ""],
+        ];
+        return cells
+          .map(
+            ([k, v, cls]) =>
+              `<div class="metric ${cls}"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`
+          )
+          .join("");
+      }
+
+      async function runDiagnostics() {
+        diagBtn.disabled = true;
+        diagBtn.textContent = "Measuring\u2026";
+        try {
+          const res = await fetch("/api/diagnostics", { method: "POST", body: new FormData(form) });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const d = await res.json();
+          document.getElementById("diag-metrics").innerHTML = metricsHtml(d.summary);
+          document.getElementById("diag-figure").src = "data:image/png;base64," + d.png;
+          diagPanel.hidden = false;
+          diagPanel.dataset.stale = "false";
+          diagHint.textContent = d.notes.length
+            ? d.notes.join("  ")
+            : `Measured ${d.summary.n_frames} frames of ${d.summary.n_dots} dots.`;
+          diagLoaded = true;
+        } catch (err) {
+          diagHint.textContent = "Could not measure the stimulus.";
+        } finally {
+          diagBtn.disabled = false;
+          diagBtn.textContent = diagLoaded ? "Re-measure" : "Measure stimulus";
+        }
+      }
+
+      function markDiagnosticsStale() {
+        if (!diagLoaded) return;
+        diagPanel.dataset.stale = "true";
+        diagBtn.textContent = "Re-measure";
+      }
+
+      diagBtn.addEventListener("click", runDiagnostics);
+
       /* ---------------- wiring ---------------- */
 
       function select(id) {
@@ -491,6 +591,7 @@
         renderFields();
         renderDoc();
         schedule(0);
+        markDiagnosticsStale();
       }
 
       document.getElementById("tabs").addEventListener("click", (e) => {
@@ -499,10 +600,16 @@
       });
 
       // Any parameter edit re-simulates; no need to press anything.
+      // Parameter edits re-simulate the preview immediately, but diagnostics cost about
+      // a second, so they are only marked stale and re-run when asked.
       form.addEventListener("input", (e) => {
         if (e.target.type !== "range") schedule();
+        markDiagnosticsStale();
       });
-      form.addEventListener("change", () => schedule());
+      form.addEventListener("change", () => {
+        schedule();
+        markDiagnosticsStale();
+      });
 
       document.getElementById("play").addEventListener("click", (e) => {
         playing = !playing;

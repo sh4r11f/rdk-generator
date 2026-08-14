@@ -9,9 +9,14 @@ This repo provides:
   or the Brownian base.
 - Optional **luminance balancing** (dark/bright dots mixed so the field's mean luminance
   equals the background), available to every method.
+- **Diagnostics** that measure what a stimulus actually did rather than what it was asked
+  for — dot overlap and effective dot count, the step-size and direction signatures of each
+  noise rule, radial density, coherence delivery, and luminance flicker.
+  See [docs/diagnostics.md](docs/diagnostics.md).
 - A small **Flask webapp** with a **live preview**: pick a method from the menu bar, and
   the stimulus re-simulates as you edit its parameters — no button to press. Each method
-  shows how it is generated and what to cite. Export writes `.mp4` and per-frame `.zip`.
+  shows how it is generated and what to cite. Export writes `.mp4`, a per-frame `.zip`, and
+  the diagnostics `.png`.
 
 See [docs/methods.md](docs/methods.md) for what each algorithm does and how they differ.
 Coherence is **not** interchangeable between them.

@@ -12,6 +12,10 @@ from .luminance import (
 from .sampling import poisson_points_in_circle, rand_points_in_circle, rand_unit_vectors
 
 SIGNAL_RULES = ("different", "same")
+
+# Why a dot was teleported this frame. Recorded only when `record_respawns` is on
+# (diagnostics turns it on) so the normal render path allocates nothing extra.
+RESPAWN_REASONS = ("aged", "exited", "replanted", "relocated")
 LUMINANCE_MODES = ("uniform", "balanced")
 
 
@@ -74,6 +78,8 @@ class BaseRDKEngine:
         self.luminance_mode = luminance_mode
 
         self.rng = np.random.default_rng(seed)
+        self.record_respawns = False
+        self.respawned: dict[str, np.ndarray] = {}
         self._init_state()
 
         sigma = gauss_sigma_px if gauss_sigma_px is not None else self._default_gauss_sigma()
@@ -158,12 +164,21 @@ class BaseRDKEngine:
         )
         return value, value, np.full(self.n, value, dtype=np.float32)
 
-    def _respawn(self, mask: np.ndarray) -> None:
+    def _begin_frame(self) -> None:
+        if self.record_respawns:
+            self.respawned = {r: np.zeros(self.n, dtype=bool) for r in RESPAWN_REASONS}
+
+    def _note_respawn(self, mask: np.ndarray, reason: str) -> None:
+        if self.record_respawns:
+            self.respawned.setdefault(reason, np.zeros(self.n, dtype=bool))[mask] = True
+
+    def _respawn(self, mask: np.ndarray, reason: str = "other") -> None:
         count = int(np.count_nonzero(mask))
         if not count:
             return
         self.xys[mask] = rand_points_in_circle(count, self.radius, self.rng)
         self._on_spawn(mask)
+        self._note_respawn(mask, reason)
 
     def _age_dots(self) -> None:
         if self.dot_life <= 0:
@@ -172,7 +187,7 @@ class BaseRDKEngine:
         dead = self.life <= 0
         if np.any(dead):
             self.life[dead] = self.dot_life
-            self._respawn(dead)
+            self._respawn(dead, reason="aged")
 
     def _move(self) -> None:
         step_scale = self.speed_px_per_s / float(self.fps)
@@ -187,7 +202,7 @@ class BaseRDKEngine:
         r2 = np.einsum("ij,ij->i", self.xys, self.xys)
         outside = r2 > (self.radius * self.radius)
         if np.any(outside):
-            self._respawn(outside)
+            self._respawn(outside, reason="exited")
 
     def compute_opacity(self) -> np.ndarray:
         """Gaussian radial mask opacity per dot in [0, 1]."""
@@ -199,6 +214,7 @@ class BaseRDKEngine:
 
     def step(self) -> None:
         """Advance the simulation by one frame."""
+        self._begin_frame()
         self._age_dots()
         if self.signal_rule == "different":
             self._assign_membership()
@@ -279,6 +295,7 @@ class MovshonNewsomeRDKEngine(BaseRDKEngine):
         self.is_signal = self.rng.random(self.n) < self.coherence
 
     def step(self) -> None:
+        self._begin_frame()
         self._age_dots()
 
         active = np.flatnonzero(self.sequence == (self.frame_index % self.n_sequences))
@@ -297,7 +314,7 @@ class MovshonNewsomeRDKEngine(BaseRDKEngine):
             if noise_idx.size:
                 relocated = np.zeros(self.n, dtype=bool)
                 relocated[noise_idx] = True
-                self._respawn(relocated)
+                self._respawn(relocated, reason="relocated")
 
         self.frame_index += 1
         self._handle_exits()
@@ -354,12 +371,13 @@ class GaussianNonOverlapMixin:
     def _initial_positions(self, n: int) -> np.ndarray:
         return self._place(n, None)
 
-    def _respawn(self, mask: np.ndarray) -> None:
+    def _respawn(self, mask: np.ndarray, reason: str = "other") -> None:
         count = int(np.count_nonzero(mask))
         if not count:
             return
         self.xys[mask] = self._place(count, self.xys[~mask])
         self._on_spawn(mask)
+        self._note_respawn(mask, reason)
 
     def _resolve_violations(self, max_iters: int = 3) -> None:
         """Replant dots that ended a step too close together.
@@ -393,7 +411,7 @@ class GaussianNonOverlapMixin:
             else:
                 victims = violating
 
-            self._respawn(victims)
+            self._respawn(victims, reason="replanted")
 
     def step(self) -> None:
         super().step()

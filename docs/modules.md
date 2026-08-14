@@ -50,11 +50,19 @@ For what the algorithms actually are and where they come from, see [methods.md](
     drawing anything. Backs the webapp's live preview.
   - `render_frames` / `write_mp4` / `write_frames_zip`.
 
+- `rdk_generator/diagnostics.py`
+  - `compute_diagnostics`: runs a stimulus and measures what it actually did — overlap and
+    nearest-neighbour spacing, step size and direction, radial density, relocations,
+    coherence delivery, and frame luminance. Pure NumPy.
+  - `figure_png` / `write_diagnostics_png`: draw the eight-panel report. The only place
+    matplotlib is used, imported lazily. See [diagnostics.md](diagnostics.md).
+
 - `rdk_generator/webapp/app.py`
   - Flask app. `parse_form` coerces, clamps, and defaults submitted values against the
     registry; `GET /api/methods` serves the registry as JSON; `POST /api/preview` returns
     packed float32 dot positions for the browser to animate on a canvas, so editing a
-    parameter updates the stimulus without an export. The page lets you pick a method from
+    parameter updates the stimulus without an export; `POST /api/diagnostics` measures the
+    stimulus and returns the report figure on demand. The page lets you pick a method from
     the menu bar, edit only its parameters, and read its description and references.
     Only the explicit export writes files.
 

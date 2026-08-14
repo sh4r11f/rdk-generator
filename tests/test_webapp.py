@@ -257,3 +257,96 @@ def test_preview_echoes_geometry_the_canvas_needs(client):
     assert d["background"] == 0.25
     assert d["fps"] == 24
     assert d["center"] == [0.0, 0.0]
+
+
+# --- diagnostics -------------------------------------------------------------
+
+
+def test_diagnostics_endpoint_returns_a_figure_and_summary(client):
+    r = client.post(
+        "/api/diagnostics",
+        data={
+            "method": "brownian",
+            "n_dots": "60",
+            "duration_s": "0.2",
+            "width_px": "120",
+            "height_px": "120",
+        },
+    )
+    assert r.status_code == 200
+    d = r.get_json()
+    assert base64.b64decode(d["png"])[:8] == b"\x89PNG\r\n\x1a\n"
+    assert d["summary"]["method"] == "brownian"
+    assert d["summary"]["n_dots"] == 60
+    assert "visible_dot_fraction" in d["summary"]
+
+
+def test_diagnostics_endpoint_writes_nothing_to_disk(client, tmp_path):
+    outputs = tmp_path / "outputs"
+    before = set(outputs.iterdir())
+    client.post(
+        "/api/diagnostics",
+        data={
+            "method": "brownian",
+            "n_dots": "40",
+            "duration_s": "0.2",
+            "width_px": "120",
+            "height_px": "120",
+        },
+    )
+    assert set(outputs.iterdir()) == before
+
+
+def test_diagnostics_reports_our_variant_as_overlap_free(client):
+    d = client.post(
+        "/api/diagnostics",
+        data={
+            "method": "gaussian_nonoverlap",
+            "n_dots": "80",
+            "duration_s": "0.2",
+            "field_diam_px": "150",
+            "width_px": "160",
+            "height_px": "160",
+        },
+    ).get_json()
+    assert d["summary"]["overlapping_pairs_per_frame"] == 0.0
+    assert d["summary"]["visible_dot_fraction"] == 1.0
+
+
+def test_export_writes_a_diagnostics_png_and_links_it(client, tmp_path):
+    r = client.post(
+        "/generate",
+        data={
+            "method": "brownian",
+            "n_dots": "40",
+            "duration_s": "0.2",
+            "width_px": "120",
+            "height_px": "120",
+        },
+        follow_redirects=True,
+    )
+    assert r.status_code == 200
+    assert b"Diagnostics (.png)" in r.data
+    written = list((tmp_path / "outputs").glob("*_diagnostics.png"))
+    assert len(written) == 1
+    assert written[0].read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_diagnostics_png_is_downloadable(client):
+    client.post(
+        "/generate",
+        data={
+            "method": "brownian",
+            "n_dots": "40",
+            "duration_s": "0.2",
+            "width_px": "120",
+            "height_px": "120",
+        },
+        follow_redirects=True,
+    )
+    body = client.get("/").get_data(as_text=True)
+    url = body.split('href="')[1:]
+    diag = next(u.split('"')[0] for u in url if "_diagnostics.png" in u)
+    r = client.get(diag)
+    assert r.status_code == 200
+    assert r.data[:8] == b"\x89PNG\r\n\x1a\n"

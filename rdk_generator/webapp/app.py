@@ -21,6 +21,7 @@ from flask import (
     url_for,
 )
 
+from ..diagnostics import compute_diagnostics, figure_png, write_diagnostics_png
 from ..export import simulate, write_frames_zip, write_mp4
 from ..methods import DEFAULT_METHOD, FIELDS, GROUP_LABELS, GROUP_ORDER, get_method, methods_payload
 from ..params import RDKParams, RenderParams
@@ -149,10 +150,13 @@ def create_app(*, instance_path: str | None = None) -> Flask:
         job_id = session.get("last_job_id")
         mp4_url = None
         zip_url = None
+        diag_url = None
         if job_id and bool(session.get("has_preview")):
             if (output_dir / f"{job_id}.mp4").exists() and (output_dir / f"{job_id}.zip").exists():
                 mp4_url = url_for("download_mp4", job_id=job_id)
                 zip_url = url_for("download_frames", job_id=job_id)
+                if (output_dir / f"{job_id}_diagnostics.png").exists():
+                    diag_url = url_for("download_diagnostics", job_id=job_id)
 
         return render_template(
             "index.html",
@@ -164,6 +168,7 @@ def create_app(*, instance_path: str | None = None) -> Flask:
             job_id=job_id,
             mp4_url=mp4_url,
             zip_url=zip_url,
+            diag_url=diag_url,
             preview_method=session.get("preview_method"),
         )
 
@@ -203,6 +208,23 @@ def create_app(*, instance_path: str | None = None) -> Flask:
             }
         )
 
+    @app.post("/api/diagnostics")
+    def api_diagnostics() -> Response:
+        """Measure the current parameters and return the diagnostic panel.
+
+        Costs roughly a second, so the page asks for this on demand rather than on
+        every parameter change.
+        """
+        rdk, render, _ = parse_form(request.form)
+        diag = compute_diagnostics(rdk, render)
+        return jsonify(
+            {
+                "summary": diag.summary(),
+                "notes": list(diag.notes),
+                "png": base64.b64encode(figure_png(diag)).decode("ascii"),
+            }
+        )
+
     @app.post("/generate")
     def generate() -> Response:
         _reset_if_stale()
@@ -218,6 +240,7 @@ def create_app(*, instance_path: str | None = None) -> Flask:
         job_id = uuid.uuid4().hex
         write_mp4(output_dir / f"{job_id}.mp4", rdk=rdk, render=render)
         write_frames_zip(output_dir / f"{job_id}.zip", rdk=rdk, render=render)
+        write_diagnostics_png(output_dir / f"{job_id}_diagnostics.png", rdk=rdk, render=render)
 
         session["last_job_id"] = job_id
         session["has_preview"] = True
@@ -237,6 +260,14 @@ def create_app(*, instance_path: str | None = None) -> Flask:
             output_dir / f"{job_id}.zip",
             as_attachment=True,
             download_name=f"rdk_frames_{job_id}.zip",
+        )
+
+    @app.get("/download/<job_id>_diagnostics.png")
+    def download_diagnostics(job_id: str):
+        return send_file(
+            output_dir / f"{job_id}_diagnostics.png",
+            as_attachment=True,
+            download_name=f"rdk_diagnostics_{job_id}.png",
         )
 
     @app.get("/meta/<job_id>")

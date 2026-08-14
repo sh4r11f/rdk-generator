@@ -183,6 +183,15 @@ Coherence values are **not** interchangeable across rows of that table, with one
 each of our variants is directly comparable to the canonical method it is built on, because
 it inherits that method's motion untouched.
 
+## Checking a stimulus is what you think it is
+
+Every claim above is measurable, and [diagnostics.md](diagnostics.md) describes the tooling
+that measures it: overlap and effective dot count, the step-size and direction fingerprints
+that distinguish the noise rules, radial density (which catches placement-sampler bugs),
+how much coherence actually gets delivered, and whether a luminance flicker rides along with
+the motion. The webapp reports it per stimulus and every export writes the figure alongside
+the clip.
+
 ## References
 
 - Britten, K. H., Shadlen, M. N., Newsome, W. T., & Movshon, J. A. (1992). The analysis of
