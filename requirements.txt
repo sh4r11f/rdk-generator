@@ -1,8 +1,0 @@
-# Runtime dependencies for the Vercel deployment.
-# Kept in step with [project.dependencies] in pyproject.toml.
-numpy>=1.26
-pillow>=10
-imageio>=2.34
-imageio-ffmpeg>=0.5
-flask>=3.0
-matplotlib>=3.8
