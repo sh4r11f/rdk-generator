@@ -4,129 +4,333 @@ import math
 
 import numpy as np
 
-from .luminance import assign_binary_luminances, resolve_dot_luminances
-from .sampling import rand_points_in_circle
+from .luminance import (
+    assign_binary_luminances,
+    resolve_dot_luminances,
+    uniform_dot_luminance,
+)
+from .sampling import poisson_points_in_circle, rand_points_in_circle, rand_unit_vectors
+
+SIGNAL_RULES = ("different", "same")
+
+# Why a dot was teleported this frame. Recorded only when `record_respawns` is on
+# (diagnostics turns it on) so the normal render path allocates nothing extra.
+RESPAWN_REASONS = ("aged", "exited", "replanted", "relocated")
+LUMINANCE_MODES = ("uniform", "balanced")
 
 
-class RDKEngine:
-    """Headless RDK simulation (positions, membership, dot life).
+class BaseRDKEngine:
+    """Shared scaffolding for every RDK algorithm (see docs/methods.md).
 
-    This is intentionally PsychoPy-free so it can be tested and used on servers.
+    Subclasses supply the noise rule — how non-signal dots move — and may override
+    placement, per-dot spawn state, and the default Gaussian envelope width.
+
+    This layer is intentionally PsychoPy-free so it can be tested and used on servers.
 
     Coordinates:
-      - Dot positions are stored relative to the field center (0,0) in pixels.
+      - Dot positions are stored relative to the field center (0, 0) in pixels,
+        with y increasing upwards.
+
+    Conventions:
+      - `dot_life_frames <= 0` disables ageing; dots then persist until they exit
+        the aperture.
+      - `signal_rule="different"` redraws the signal subset every frame;
+        `"same"` fixes it for the whole run.
     """
+
+    method_id = "base"
 
     def __init__(
         self,
         *,
         n_dots: int,
-        dot_life_frames: int,
         coherence: float,
         direction_deg: float,
         speed_px_per_s: float,
         field_diam_px: float,
-        gauss_sigma_px: float | None,
-        reassign_life: bool,
         fps: int,
-        seed: int | None,
-        background_lum: float,
-        dot_contrast: float | None,
-        dot_low_lum: float | None,
-        dot_high_lum: float | None,
+        seed: int | None = None,
+        dot_life_frames: int = 0,
+        signal_rule: str = "different",
+        gauss_sigma_px: float | None = None,
+        background_lum: float = 0.5,
+        dot_contrast: float | None = 1.0,
+        dot_low_lum: float | None = None,
+        dot_high_lum: float | None = None,
+        luminance_mode: str = "uniform",
     ) -> None:
+        if signal_rule not in SIGNAL_RULES:
+            raise ValueError(f"signal_rule must be one of {SIGNAL_RULES}, got {signal_rule!r}")
+        if luminance_mode not in LUMINANCE_MODES:
+            raise ValueError(
+                f"luminance_mode must be one of {LUMINANCE_MODES}, got {luminance_mode!r}"
+            )
+
         self.n = int(max(1, n_dots))
-        self.dot_life = int(max(1, dot_life_frames))
         self.coherence = float(np.clip(coherence, 0.0, 1.0))
         self.direction_deg = float(direction_deg)
         self.speed_px_per_s = float(speed_px_per_s)
         self.field_diam = float(field_diam_px)
         self.radius = self.field_diam / 2.0
-        self.gauss_sigma = (
-            float(gauss_sigma_px) if gauss_sigma_px is not None else (self.radius / 2.0)
-        )
-        self.reassign_life = bool(reassign_life)
         self.fps = int(max(1, fps))
+        self.dot_life = int(dot_life_frames)
+        self.signal_rule = signal_rule
+        self.luminance_mode = luminance_mode
 
         self.rng = np.random.default_rng(seed)
+        self.record_respawns = False
+        self.respawned: dict[str, np.ndarray] = {}
+        self._init_state()
 
-        self.xys = rand_points_in_circle(self.n, self.radius, self.rng)
-        self.life = self.rng.integers(1, self.dot_life + 1, size=self.n, dtype=np.int32)
+        sigma = gauss_sigma_px if gauss_sigma_px is not None else self._default_gauss_sigma()
+        self.gauss_sigma = float(sigma) if sigma is not None else 0.0
+
+        self.xys = self._initial_positions(self.n)
+        self.life = (
+            self.rng.integers(1, self.dot_life + 1, size=self.n, dtype=np.int32)
+            if self.dot_life > 0
+            else np.zeros(self.n, dtype=np.int32)
+        )
         self.is_signal = np.zeros(self.n, dtype=bool)
         self._assign_membership()
+        self._on_spawn(np.ones(self.n, dtype=bool))
 
-        lo, hi = resolve_dot_luminances(
+        self.dot_low_lum, self.dot_high_lum, self.dot_lum = self._resolve_luminance(
             background_lum=background_lum,
             dot_contrast=dot_contrast,
             dot_low_lum=dot_low_lum,
             dot_high_lum=dot_high_lum,
         )
-        self.dot_low_lum = float(lo)
-        self.dot_high_lum = float(hi)
-        self.dot_lum = assign_binary_luminances(
-            self.n,
-            background_lum=background_lum,
-            low_lum=self.dot_low_lum,
-            high_lum=self.dot_high_lum,
-            rng=self.rng,
-        )
 
         theta = math.radians(self.direction_deg)
         self.signal_vec = np.array([math.cos(theta), math.sin(theta)], dtype=np.float32)
 
+    # -- hooks -------------------------------------------------------------
+
+    def _init_state(self) -> None:
+        """Allocate subclass-specific per-dot arrays. Runs before dot placement."""
+
+    def _default_gauss_sigma(self) -> float | None:
+        """Envelope width used when the caller does not supply one. None = hard aperture."""
+        return None
+
+    def _initial_positions(self, n: int) -> np.ndarray:
+        return rand_points_in_circle(n, self.radius, self.rng)
+
+    def _on_spawn(self, mask: np.ndarray) -> None:
+        """Refresh per-dot state for newly (re)placed dots."""
+
+    def _move_noise(self, noise: np.ndarray, step_scale: float) -> None:
+        raise NotImplementedError("subclasses define the noise rule")
+
+    # -- shared mechanics --------------------------------------------------
+
     def _assign_membership(self) -> None:
+        """Choose the signal subset as an exact count of `coherence * n_dots`."""
         n_sig = int(round(self.n * self.coherence))
-        idx = np.arange(self.n)
-        self.rng.shuffle(idx)
-        self.is_signal[:] = False
+        is_signal = np.zeros(self.n, dtype=bool)
         if n_sig > 0:
-            self.is_signal[idx[:n_sig]] = True
+            is_signal[self.rng.permutation(self.n)[:n_sig]] = True
+        self.is_signal = is_signal
 
-    def compute_opacity(self) -> np.ndarray:
-        """Gaussian radial mask opacity per dot in [0,1]."""
-        if self.gauss_sigma <= 0:
-            return np.ones(self.n, dtype=np.float32)
-        r2 = np.sum(self.xys * self.xys, axis=1)
-        sigma2 = float(self.gauss_sigma) ** 2
-        alpha = np.exp(-0.5 * r2 / sigma2)
-        return np.clip(alpha, 0.0, 1.0).astype(np.float32)
+    def _resolve_luminance(
+        self,
+        *,
+        background_lum: float,
+        dot_contrast: float | None,
+        dot_low_lum: float | None,
+        dot_high_lum: float | None,
+    ) -> tuple[float, float, np.ndarray]:
+        if self.luminance_mode == "balanced":
+            lo, hi = resolve_dot_luminances(
+                background_lum=background_lum,
+                dot_contrast=dot_contrast,
+                dot_low_lum=dot_low_lum,
+                dot_high_lum=dot_high_lum,
+            )
+            lum = assign_binary_luminances(
+                self.n,
+                background_lum=background_lum,
+                low_lum=lo,
+                high_lum=hi,
+                rng=self.rng,
+            )
+            return float(lo), float(hi), lum
 
-    def step(self) -> None:
-        """Advance simulation by one frame."""
+        value = uniform_dot_luminance(
+            background_lum=background_lum,
+            dot_contrast=dot_contrast,
+            dot_high_lum=dot_high_lum,
+        )
+        return value, value, np.full(self.n, value, dtype=np.float32)
+
+    def _begin_frame(self) -> None:
+        if self.record_respawns:
+            self.respawned = {r: np.zeros(self.n, dtype=bool) for r in RESPAWN_REASONS}
+
+    def _note_respawn(self, mask: np.ndarray, reason: str) -> None:
+        if self.record_respawns:
+            self.respawned.setdefault(reason, np.zeros(self.n, dtype=bool))[mask] = True
+
+    def _respawn(self, mask: np.ndarray, reason: str = "other") -> None:
+        count = int(np.count_nonzero(mask))
+        if not count:
+            return
+        self.xys[mask] = rand_points_in_circle(count, self.radius, self.rng)
+        self._on_spawn(mask)
+        self._note_respawn(mask, reason)
+
+    def _age_dots(self) -> None:
+        if self.dot_life <= 0:
+            return
         self.life -= 1
         dead = self.life <= 0
         if np.any(dead):
-            self.xys[dead] = rand_points_in_circle(int(np.sum(dead)), self.radius, self.rng)
             self.life[dead] = self.dot_life
-            if self.reassign_life:
-                self._assign_membership()
+            self._respawn(dead, reason="aged")
 
+    def _move(self) -> None:
         step_scale = self.speed_px_per_s / float(self.fps)
-        steps = np.empty_like(self.xys)
+        signal = self.is_signal
+        if np.any(signal):
+            self.xys[signal] += self.signal_vec[None, :] * step_scale
+        noise = ~signal
+        if np.any(noise):
+            self._move_noise(noise, step_scale)
 
-        steps[self.is_signal] = self.signal_vec[None, :] * step_scale
-        n_noise = int(np.count_nonzero(~self.is_signal))
-        if n_noise:
-            thetas = 2.0 * np.pi * self.rng.random(n_noise)
-            rand_vecs = np.column_stack([np.cos(thetas), np.sin(thetas)]).astype(np.float32)
-            steps[~self.is_signal] = rand_vecs * step_scale
-
-        self.xys += steps
-
-        outside = np.sum(self.xys * self.xys, axis=1) > (self.radius * self.radius)
+    def _handle_exits(self) -> None:
+        r2 = np.einsum("ij,ij->i", self.xys, self.xys)
+        outside = r2 > (self.radius * self.radius)
         if np.any(outside):
-            self.xys[outside] = rand_points_in_circle(int(np.sum(outside)), self.radius, self.rng)
+            self._respawn(outside, reason="exited")
+
+    def compute_opacity(self) -> np.ndarray:
+        """Gaussian radial mask opacity per dot in [0, 1]."""
+        if self.gauss_sigma <= 0:
+            return np.ones(self.n, dtype=np.float32)
+        r2 = np.einsum("ij,ij->i", self.xys, self.xys)
+        alpha = np.exp(-0.5 * r2 / (float(self.gauss_sigma) ** 2))
+        return np.clip(alpha, 0.0, 1.0).astype(np.float32)
+
+    def step(self) -> None:
+        """Advance the simulation by one frame."""
+        self._begin_frame()
+        self._age_dots()
+        if self.signal_rule == "different":
+            self._assign_membership()
+        self._move()
+        self._handle_exits()
 
 
-class NonOverlappingRDKEngine(RDKEngine):
-    """RDK engine that keeps dot centers at least `min_sep_px` apart.
+class BrownianRDKEngine(BaseRDKEngine):
+    """Random-walk noise: each noise dot steps at signal speed in a fresh random direction.
 
-    This is a separate algorithm/code path intended for offline rendering/export.
+    Scase, Braddick & Raymond (1996) "random walk"; the BM algorithm of Pilly & Seitz (2009).
+    """
 
-    Implementation notes:
-      - Initial placement and respawns use rejection sampling.
-      - After each motion step, any dots that violate the constraint are replanted.
-      - For very high densities, the sampler adaptively relaxes `min_sep_px`.
+    method_id = "brownian"
+
+    def _move_noise(self, noise: np.ndarray, step_scale: float) -> None:
+        count = int(np.count_nonzero(noise))
+        self.xys[noise] += rand_unit_vectors(count, self.rng) * step_scale
+
+
+class WhiteNoiseRDKEngine(BaseRDKEngine):
+    """Random-position noise: each noise dot is relocated anywhere in the aperture each frame.
+
+    Scase et al. (1996) "random position"; the WN algorithm of Pilly & Seitz (2009).
+    """
+
+    method_id = "white_noise"
+
+    def _move_noise(self, noise: np.ndarray, step_scale: float) -> None:
+        # Route through _respawn rather than placing directly: it records the teleport
+        # and, under the non-overlap mixin, honours the minimum separation.
+        self._respawn(noise, reason="relocated")
+
+
+class RandomDirectionRDKEngine(BaseRDKEngine):
+    """Random-direction noise: each noise dot keeps one random heading for its lifetime.
+
+    Scase et al. (1996) "random direction". Because a heading is only redrawn when the dot
+    respawns, `dot_life_frames` controls how quickly the noise directions refresh.
+    """
+
+    method_id = "random_direction"
+
+    def _init_state(self) -> None:
+        self.dot_dir = np.zeros((self.n, 2), dtype=np.float32)
+
+    def _on_spawn(self, mask: np.ndarray) -> None:
+        count = int(np.count_nonzero(mask))
+        if count:
+            self.dot_dir[mask] = rand_unit_vectors(count, self.rng)
+
+    def _move_noise(self, noise: np.ndarray, step_scale: float) -> None:
+        self.xys[noise] += self.dot_dir[noise] * step_scale
+
+
+class MovshonNewsomeRDKEngine(BaseRDKEngine):
+    """Three-sequence interleaved algorithm of Newsome & Paré (1988) / Britten et al. (1992).
+
+    Dots are split into `n_sequences` interleaved groups; one group is redrawn per frame, so
+    each dot updates every `n_sequences` frames and its coherent displacement is scaled
+    accordingly. On update, each dot independently carries the signal with probability
+    `coherence` or is relocated to a random position. Coherence is a per-dot probability
+    here, not an exact count, which makes the stimulus inherently `different`-rule.
+    """
+
+    method_id = "movshon_newsome"
+
+    def __init__(self, *, n_sequences: int = 3, **kwargs) -> None:
+        self.n_sequences = int(max(1, n_sequences))
+        kwargs["signal_rule"] = "different"
+        super().__init__(**kwargs)
+
+    def _init_state(self) -> None:
+        self.sequence = self.rng.integers(0, self.n_sequences, size=self.n)
+        self.frame_index = 0
+
+    def _assign_membership(self) -> None:
+        # Coherence is a per-dot probability in this algorithm, not an exact count.
+        self.is_signal = self.rng.random(self.n) < self.coherence
+
+    def step(self) -> None:
+        self._begin_frame()
+        self._age_dots()
+
+        active = np.flatnonzero(self.sequence == (self.frame_index % self.n_sequences))
+        self.is_signal = np.zeros(self.n, dtype=bool)
+        if active.size:
+            # A dot only updates every `n_sequences` frames, so it travels that much
+            # further when it does.
+            step_scale = self.speed_px_per_s / float(self.fps) * float(self.n_sequences)
+            carries_signal = self.rng.random(active.size) < self.coherence
+            signal_idx = active[carries_signal]
+            noise_idx = active[~carries_signal]
+
+            if signal_idx.size:
+                self.is_signal[signal_idx] = True
+                self.xys[signal_idx] += self.signal_vec[None, :] * step_scale
+            if noise_idx.size:
+                relocated = np.zeros(self.n, dtype=bool)
+                relocated[noise_idx] = True
+                self._respawn(relocated, reason="relocated")
+
+        self.frame_index += 1
+        self._handle_exits()
+
+
+class GaussianNonOverlapMixin:
+    """Our two modifications: a Gaussian envelope and a minimum dot separation.
+
+    Mix in *before* any engine class to apply both without touching its motion rule::
+
+        class Variant(GaussianNonOverlapMixin, BrownianRDKEngine): ...
+
+    Nothing here depends on how the host engine moves its dots; it only overrides the
+    placement, respawn, and envelope hooks that `BaseRDKEngine` defines. See
+    docs/methods.md for what the modifications are for and what they cost.
     """
 
     def __init__(
@@ -137,135 +341,104 @@ class NonOverlappingRDKEngine(RDKEngine):
         relax_factor: float = 0.95,
         **kwargs,
     ) -> None:
-        self.min_sep_px = float(min_sep_px)
-        if self.min_sep_px <= 0:
+        min_sep = float(min_sep_px)
+        if min_sep <= 0:
             raise ValueError("min_sep_px must be > 0")
+        if not (0.0 < float(relax_factor) < 1.0):
+            raise ValueError("relax_factor must be in (0, 1)")
+        self.min_sep_px = min_sep
         self.max_reject_attempts = int(max(1, max_reject_attempts))
         self.relax_factor = float(relax_factor)
-        if not (0.0 < self.relax_factor < 1.0):
-            raise ValueError("relax_factor must be in (0,1)")
-
         super().__init__(**kwargs)
 
-        # Replace initial positions with non-overlapping placement.
-        self.xys = self._poisson_rejection(self.n, self.radius, self.min_sep_px)
+    def _default_gauss_sigma(self) -> float | None:
+        return self.radius / 2.0
 
-    def _poisson_rejection(self, n: int, radius: float, min_sep_px: float) -> np.ndarray:
-        min_sep_px = float(min_sep_px)
-        min_sep_sq = min_sep_px * min_sep_px
-        pts: list[tuple[float, float]] = []
-        attempts = 0
+    def _place(self, count: int, existing: np.ndarray | None) -> np.ndarray:
+        pts, achieved = poisson_points_in_circle(
+            count,
+            self.radius,
+            self.min_sep_px,
+            self.rng,
+            existing=existing,
+            max_attempts=self.max_reject_attempts,
+            relax_factor=self.relax_factor,
+        )
+        # The field may be too dense for the requested spacing; keep whatever the
+        # sampler could actually achieve so later frames stay self-consistent.
+        self.min_sep_px = achieved
+        return pts
 
-        while len(pts) < n:
-            if attempts > self.max_reject_attempts:
-                # Too dense; relax slightly and restart.
-                min_sep_px *= self.relax_factor
-                min_sep_sq = min_sep_px * min_sep_px
-                pts = []
-                attempts = 0
+    def _initial_positions(self, n: int) -> np.ndarray:
+        return self._place(n, None)
 
-            cand = rand_points_in_circle(1, radius, self.rng)[0]
-            x = float(cand[0])
-            y = float(cand[1])
-            ok = True
-            for px, py in pts:
-                dx = x - px
-                dy = y - py
-                if dx * dx + dy * dy < min_sep_sq:
-                    ok = False
-                    break
-            if ok:
-                pts.append((x, y))
-            attempts += 1
-
-        return np.asarray(pts, dtype=np.float32)
-
-    def _respawn_with_distance(self, mask: np.ndarray) -> None:
-        if not np.any(mask):
+    def _respawn(self, mask: np.ndarray, reason: str = "other") -> None:
+        count = int(np.count_nonzero(mask))
+        if not count:
             return
-
-        min_sep_sq = float(self.min_sep_px) ** 2
-        radius = float(self.radius)
-        existing = self.xys[~mask]
-        n_new = int(np.sum(mask))
-        new_pts: list[tuple[float, float]] = []
-        attempts = 0
-
-        while len(new_pts) < n_new:
-            if attempts > self.max_reject_attempts:
-                # Too dense; relax slightly and restart this batch.
-                self.min_sep_px *= self.relax_factor
-                min_sep_sq = float(self.min_sep_px) ** 2
-                new_pts = []
-                attempts = 0
-
-            cand = rand_points_in_circle(1, radius, self.rng)[0]
-            x = float(cand[0])
-            y = float(cand[1])
-
-            ok = True
-            if existing.size:
-                dx = x - existing[:, 0]
-                dy = y - existing[:, 1]
-                if np.any(dx * dx + dy * dy < min_sep_sq):
-                    ok = False
-
-            if ok and new_pts:
-                for px, py in new_pts:
-                    dx2 = x - px
-                    dy2 = y - py
-                    if dx2 * dx2 + dy2 * dy2 < min_sep_sq:
-                        ok = False
-                        break
-
-            if ok:
-                new_pts.append((x, y))
-
-            attempts += 1
-
-        self.xys[mask] = np.asarray(new_pts, dtype=np.float32)
+        self.xys[mask] = self._place(count, self.xys[~mask])
+        self._on_spawn(mask)
+        self._note_respawn(mask, reason)
 
     def _resolve_violations(self, max_iters: int = 3) -> None:
-        # Iteratively replant any dots that violate the minimum distance.
-        min_sep_sq = float(self.min_sep_px) ** 2
-        for _ in range(int(max_iters)):
+        """Replant dots that ended a step too close together.
+
+        Replanting is a teleport, so which dot moves matters: displacing a dot that just
+        carried the signal perturbs the motion. Earlier passes therefore sacrifice noise
+        dots by preference and only move a signal dot when its conflict cannot be cleared
+        otherwise. This matters most for the interleaved method, where one displacement
+        stands in for `n_sequences` frames of signal. The final pass moves every dot still
+        in conflict, which always resolves.
+        """
+        last = int(max_iters) - 1
+        for attempt in range(int(max_iters)):
+            # `_respawn` may relax the separation, so re-read it every pass.
+            sep_sq = self.min_sep_px * self.min_sep_px
             diff = self.xys[:, None, :] - self.xys[None, :, :]
-            dist_sq = np.sum(diff * diff, axis=2)
+            dist_sq = np.einsum("ijk,ijk->ij", diff, diff)
             np.fill_diagonal(dist_sq, np.inf)
-            viol = dist_sq < min_sep_sq
-            if not np.any(viol):
+            conflict = dist_sq < sep_sq
+            violating = np.any(conflict, axis=1)
+            if not np.any(violating):
                 return
-            repl_mask = np.any(viol, axis=1)
-            self._respawn_with_distance(repl_mask)
+
+            if attempt < last:
+                victims = violating & ~self.is_signal
+                staying = ~victims
+                # Anything still conflicting with a dot that stays has to move as well.
+                victims = victims | (
+                    violating & staying & np.any(conflict & staying[None, :], axis=1)
+                )
+            else:
+                victims = violating
+
+            self._respawn(victims, reason="replanted")
 
     def step(self) -> None:
-        # Same as base, but all replanting respects minimum distance and
-        # we also resolve collisions after motion.
-        self.life -= 1
-        dead = self.life <= 0
-        if np.any(dead):
-            self.life[dead] = self.dot_life
-            if self.reassign_life:
-                self._assign_membership()
-            self._respawn_with_distance(dead)
+        super().step()
+        self._resolve_violations()
 
-        step_scale = self.speed_px_per_s / float(self.fps)
-        steps = np.empty_like(self.xys)
-        steps[self.is_signal] = self.signal_vec[None, :] * step_scale
 
-        n_noise = int(np.count_nonzero(~self.is_signal))
-        if n_noise:
-            thetas = 2.0 * np.pi * self.rng.random(n_noise)
-            rand_vecs = np.column_stack([np.cos(thetas), np.sin(thetas)]).astype(np.float32)
-            steps[~self.is_signal] = rand_vecs * step_scale
+class GaussianNonOverlapMNEngine(GaussianNonOverlapMixin, MovshonNewsomeRDKEngine):
+    """Our variant: the Movshon-Newsome method plus a soft aperture and even dot spacing.
 
-        self.xys += steps
+    Motion — three interleaved sequences, per-dot probabilistic coherence, noise dots
+    relocated — is inherited from `MovshonNewsomeRDKEngine` unchanged, so coherence stays
+    comparable with that method.
+    """
 
-        outside = np.sum(self.xys * self.xys, axis=1) > (self.radius * self.radius)
-        if np.any(outside):
-            self._respawn_with_distance(outside)
+    method_id = "gaussian_nonoverlap"
 
-        self._resolve_violations(max_iters=3)
+
+class GaussianNonOverlapRDKEngine(GaussianNonOverlapMixin, BrownianRDKEngine):
+    """The same two modifications applied to the Brownian method instead.
+
+    Cheaper to enforce than the interleaved variant (dots move a pixel or two per frame,
+    so the separation constraint rarely fires) and its coherence is an exact count rather
+    than a per-frame Bernoulli draw.
+    """
+
+    method_id = "gaussian_nonoverlap_brownian"
 
 
 class FrameRenderer:
@@ -346,3 +519,24 @@ class FrameRenderer:
             patch[m] = v
 
         return (np.clip(img, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
+
+
+class GaussianNonOverlapWNEngine(GaussianNonOverlapMixin, WhiteNoiseRDKEngine):
+    """Our modifications on the white-noise base.
+
+    Noise dots still jump to a fresh position every frame, but now to one that clears the
+    minimum separation, so the field never has two dots on top of each other even though
+    most of it is teleporting.
+    """
+
+    method_id = "gaussian_nonoverlap_white_noise"
+
+
+class GaussianNonOverlapRDEngine(GaussianNonOverlapMixin, RandomDirectionRDKEngine):
+    """Our modifications on the random-direction base.
+
+    Noise dots keep their fixed headings; a dot replanted for crowding gets a new heading
+    along with its new position, exactly as a respawn would.
+    """
+
+    method_id = "gaussian_nonoverlap_random_direction"

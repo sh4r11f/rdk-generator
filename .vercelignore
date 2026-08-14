@@ -1,0 +1,14 @@
+.venv
+tests
+docs
+.claude
+.git
+.github
+htmlcov
+**/__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+instance
+scratch
+*.mp4

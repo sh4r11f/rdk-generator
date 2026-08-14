@@ -1,13 +1,130 @@
 from __future__ import annotations
 
+import base64
+import json
 import os
-import uuid
+from dataclasses import fields as dataclass_fields
 from pathlib import Path
+from typing import Any
 
-from flask import Flask, Response, redirect, render_template, request, send_file, session, url_for
+import numpy as np
+from flask import (
+    Flask,
+    Response,
+    jsonify,
+    render_template,
+    request,
+    session,
+)
 
-from ..export import write_frames_zip, write_mp4
+from ..bundle import everything_zip
+from ..diagnostics import (
+    compute_diagnostics,
+    figure_png,
+    figures_zip,
+    guide_payload,
+)
+from ..export import (
+    frames_zip_bytes,
+    params_json,
+    resolve_seed,
+    simulate,
+    video_bytes,
+)
+from ..methods import DEFAULT_METHOD, FIELDS, GROUP_LABELS, GROUP_ORDER, get_method, methods_payload
 from ..params import RDKParams, RenderParams
+
+_RDK_FIELDS = {f.name for f in dataclass_fields(RDKParams)}
+_RENDER_FIELDS = {f.name for f in dataclass_fields(RenderParams)}
+
+# Parameters where a non-positive value means "derive a sensible default".
+_AUTO_WHEN_ZERO = ("gauss_sigma_px", "min_sep_px")
+
+# The live preview streams raw dot positions, so its cost scales with frames x dots.
+# Long clips are truncated for the preview only; exports always use the full duration.
+PREVIEW_MAX_FRAMES = 150
+
+# Vercel caps a function response body at 4.5 MB. Exports are streamed in the response, so
+# a long or high-resolution clip can exceed it. Enforced only when actually running there,
+# where it turns an opaque platform 413 into an actionable message; a normal server has no
+# such limit and is left alone.
+VERCEL_RESPONSE_LIMIT = 4_400_000
+
+
+def _pack(array) -> str:
+    """Encode an array as little-endian float32 base64, for the browser to decode."""
+    return base64.b64encode(np.ascontiguousarray(array, dtype="<f4").tobytes()).decode("ascii")
+
+
+def _coerce(name: str, raw: str | None) -> Any:
+    """Coerce one raw form value to its declared type, or None if blank/unparseable."""
+    spec_field = FIELDS[name]
+    if raw is None:
+        return None
+    raw = raw.strip()
+    if raw == "":
+        return None
+
+    if spec_field.kind == "int":
+        try:
+            return int(round(float(raw)))
+        except ValueError:
+            return None
+    if spec_field.kind == "float":
+        try:
+            return float(raw)
+        except ValueError:
+            return None
+    if spec_field.kind == "choice":
+        return raw if raw in {value for value, _ in spec_field.choices} else None
+    return raw
+
+
+def _clamp(name: str, value: Any) -> Any:
+    spec_field = FIELDS[name]
+    if spec_field.kind not in ("int", "float"):
+        return value
+    if spec_field.min is not None and value < spec_field.min:
+        value = spec_field.min
+    if spec_field.max is not None and value > spec_field.max:
+        value = spec_field.max
+    return int(value) if spec_field.kind == "int" else float(value)
+
+
+def parse_form(form) -> tuple[RDKParams, RenderParams, dict[str, Any]]:
+    """Build params from a submitted form, using the method's defaults for anything missing.
+
+    Returns the two param objects plus a plain dict suitable for re-populating the UI.
+    """
+    spec = get_method(form.get("method"))
+
+    values: dict[str, Any] = {}
+    for name in spec.param_names:
+        value = _coerce(name, form.get(name))
+        if value is None:
+            if name == "seed":
+                values[name] = ""
+                continue
+            value = spec.default_for(name)
+        values[name] = _clamp(name, value)
+
+    sticky = dict(values)
+    sticky["method"] = spec.id
+
+    rdk_kwargs: dict[str, Any] = {"method": spec.id}
+    render_kwargs: dict[str, Any] = {}
+    for name, value in values.items():
+        if name == "seed":
+            render_kwargs["seed"] = None if value == "" else int(value)
+            continue
+        if name in _AUTO_WHEN_ZERO and (value is None or float(value) <= 0):
+            value = None
+        if name in _RDK_FIELDS:
+            rdk_kwargs[name] = value
+        elif name in _RENDER_FIELDS:
+            render_kwargs[name] = value
+
+    return RDKParams(**rdk_kwargs), RenderParams(**render_kwargs), sticky
 
 
 def create_app(*, instance_path: str | None = None) -> Flask:
@@ -22,158 +139,175 @@ def create_app(*, instance_path: str | None = None) -> Flask:
     # For real deployments set RDK_SECRET_KEY to a strong random value.
     app.config["SECRET_KEY"] = os.environ.get("RDK_SECRET_KEY", "dev-secret-key-change-me")
     # Bump this if session semantics change.
-    app.config["SESSION_SCHEMA_VERSION"] = "v1"
+    app.config["SESSION_SCHEMA_VERSION"] = "v3"
 
-    output_dir = Path(app.instance_path) / "outputs"
-    output_dir.mkdir(parents=True, exist_ok=True)
+    # Deliberately no output directory: exports are streamed straight back in the
+    # response. Writing them to disk and serving them on a later request needs a
+    # writable filesystem shared across requests, which a serverless host has not got.
+
+    @app.before_request
+    def _reset_if_stale() -> None:
+        # Runs for every route, so a handler that writes to the session cannot forget to
+        # stamp the schema and have its values wiped by the next page load.
+        schema = app.config.get("SESSION_SCHEMA_VERSION")
+        if session.get("_schema") != schema:
+            session["_schema"] = schema
+            session.pop("saved_params", None)
+
+    def _download(blob: bytes, mimetype: str, filename: str) -> Response:
+        if os.environ.get("VERCEL") and len(blob) > VERCEL_RESPONSE_LIMIT:
+            megabytes = len(blob) / 1e6
+            return (
+                jsonify(
+                    {
+                        "error": (
+                            f"This export is {megabytes:.1f} MB, over the 4.5 MB response "
+                            "limit this deployment can return. Shorten the clip, lower the "
+                            "frame rate, or reduce the width and height — or render it "
+                            "locally with the library, which has no such limit."
+                        )
+                    }
+                ),
+                413,
+            )
+        return Response(
+            blob,
+            mimetype=mimetype,
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    def _remember(rdk: RDKParams, sticky: dict) -> None:
+        saved = dict(session.get("saved_params") or {})
+        saved[rdk.method] = sticky
+        session["saved_params"] = saved
+        session["last_method"] = rdk.method
 
     @app.get("/")
     def index() -> str:
-        last_params = session.get("last_params") or {}
-
-        # Ensure "first view" never auto-shows a preview.
-        # If the schema version changed (or session is new), we keep params but clear preview.
-        schema = app.config.get("SESSION_SCHEMA_VERSION")
-        if session.get("_schema") != schema:
-            session["_schema"] = schema
-            session.pop("last_job_id", None)
-            session["has_preview"] = False
-
-        # Default UI preferences (while still allowing sticky overrides)
-        if "prevent_overlap" not in last_params:
-            last_params["prevent_overlap"] = "on"
-        if "min_sep_px" not in last_params or last_params.get("min_sep_px") in (None, ""):
-            try:
-                dot_size = float(last_params.get("dot_size_px", 3))
-            except Exception:
-                dot_size = 3.0
-            last_params["min_sep_px"] = round(dot_size * 1.1, 2)
-
-        job_id = session.get("last_job_id")
-        mp4_url = None
-        zip_url = None
-        if job_id and bool(session.get("has_preview")):
-            mp4_path = output_dir / f"{job_id}.mp4"
-            zip_path = output_dir / f"{job_id}.zip"
-            if mp4_path.exists() and zip_path.exists():
-                mp4_url = url_for("download_mp4", job_id=job_id)
-                zip_url = url_for("download_frames", job_id=job_id)
+        saved = session.get("saved_params") or {}
+        selected = session.get("last_method") or DEFAULT_METHOD
+        if selected not in {m["id"] for m in methods_payload()}:
+            selected = DEFAULT_METHOD
 
         return render_template(
             "index.html",
-            params=last_params,
-            job_id=job_id,
-            mp4_url=mp4_url,
-            zip_url=zip_url,
+            methods_json=json.dumps(methods_payload()),
+            guide_json=json.dumps(guide_payload()),
+            saved_json=json.dumps(saved),
+            selected=selected,
+            group_order=list(GROUP_ORDER),
+            group_labels=GROUP_LABELS,
         )
 
-    def _parse_int(name: str, default: int) -> int:
-        try:
-            return int(request.form.get(name, default))
-        except Exception:
-            return default
+    @app.get("/api/methods")
+    def api_methods() -> Response:
+        return jsonify(methods_payload())
 
-    def _parse_float(name: str, default: float) -> float:
-        try:
-            return float(request.form.get(name, default))
-        except Exception:
-            return default
+    @app.get("/api/diagnostic-guide")
+    def api_diagnostic_guide() -> Response:
+        return jsonify(guide_payload())
 
-    @app.post("/generate")
-    def generate() -> Response:
-        # If a user posts to /generate before ever loading /, ensure we don't treat
-        # the redirect target as a "first view" that must hide the preview.
-        schema = app.config.get("SESSION_SCHEMA_VERSION")
-        if session.get("_schema") != schema:
-            session["_schema"] = schema
+    @app.post("/api/preview")
+    def api_preview() -> Response:
+        """Simulate the current parameters and hand the browser raw dot positions.
 
-        prevent_overlap = bool(request.form.get("prevent_overlap", "") == "on")
-        min_sep_px = _parse_float("min_sep_px", 0.0)
-        if not prevent_overlap:
-            min_sep_val = None
-        else:
-            if min_sep_px <= 0:
-                # Sensible default when enabled
-                min_sep_val = float(_parse_int("dot_size_px", 3)) * 1.1
-            else:
-                min_sep_val = float(min_sep_px)
+        Deliberately does not touch disk or the session: this fires on every parameter
+        change, and only the explicit export writes files.
+        """
+        rdk, render, _ = parse_form(request.form)
+        sim = simulate(rdk, render, max_frames=PREVIEW_MAX_FRAMES)
+        spec = get_method(rdk.method)
 
-        rdk = RDKParams(
-            n_dots=_parse_int("n_dots", 300),
-            dot_size_px=_parse_int("dot_size_px", 3),
-            speed_px_per_s=_parse_float("speed_px_per_s", 120.0),
-            dot_life_frames=_parse_int("dot_life_frames", 12),
-            direction_deg=_parse_float("direction_deg", 0.0),
-            coherence=_parse_float("coherence", 0.5),
-            field_diam_px=_parse_int("field_diam_px", 300),
-            field_center_xy_px=(0.0, 0.0),
-            gauss_sigma_px=(
-                _parse_float("gauss_sigma_px", 0.0)
-                if _parse_float("gauss_sigma_px", 0.0) > 0
-                else None
-            ),
-            reassign_life=bool(request.form.get("reassign_life", "on") == "on"),
-            min_sep_px=min_sep_val,
+        return jsonify(
+            {
+                "method": spec.id,
+                "label": spec.label,
+                "n_frames": sim["n_frames"],
+                "total_frames": sim["total_frames"],
+                "truncated": sim["truncated"],
+                "n_dots": sim["n_dots"],
+                "fps": render.fps,
+                "width": render.width_px,
+                "height": render.height_px,
+                "background": render.background_lum,
+                "dot_size": rdk.dot_size_px,
+                "field_diam": rdk.field_diam_px,
+                "center": list(rdk.field_center_xy_px),
+                "xy": _pack(sim["xy"]),
+                "alpha": _pack(sim["alpha"]),
+                "lum": _pack(sim["dot_lum"]),
+            }
         )
 
-        render = RenderParams(
-            width_px=_parse_int("width_px", 512),
-            height_px=_parse_int("height_px", 512),
-            fps=_parse_int("fps", 60),
-            duration_s=_parse_float("duration_s", 1.0),
-            background_lum=_parse_float("background_lum", 0.5),
-            dot_contrast=_parse_float("dot_contrast", 1.0),
-            seed=_parse_int("seed", 0) if request.form.get("seed", "") != "" else None,
+    @app.post("/api/diagnostics")
+    def api_diagnostics() -> Response:
+        """Measure the current parameters and return the diagnostic panel.
+
+        Costs roughly a second, so the page asks for this on demand rather than on
+        every parameter change.
+        """
+        rdk, render, _ = parse_form(request.form)
+        diag = compute_diagnostics(rdk, render)
+        return jsonify(
+            {
+                "summary": diag.summary(),
+                "notes": list(diag.notes),
+                "png": base64.b64encode(figure_png(diag)).decode("ascii"),
+            }
         )
 
-        # Remember last-used params so the UI stays sticky.
-        session["last_params"] = {
-            "n_dots": rdk.n_dots,
-            "dot_size_px": rdk.dot_size_px,
-            "speed_px_per_s": rdk.speed_px_per_s,
-            "dot_life_frames": rdk.dot_life_frames,
-            "direction_deg": rdk.direction_deg,
-            "coherence": rdk.coherence,
-            "field_diam_px": rdk.field_diam_px,
-            "gauss_sigma_px": (rdk.gauss_sigma_px or 0),
-            "width_px": render.width_px,
-            "height_px": render.height_px,
-            "fps": render.fps,
-            "duration_s": render.duration_s,
-            "background_lum": render.background_lum,
-            "dot_contrast": render.dot_contrast,
-            "seed": ("" if render.seed is None else render.seed),
-            "reassign_life": ("on" if rdk.reassign_life else ""),
-            "prevent_overlap": ("on" if rdk.min_sep_px is not None else ""),
-            "min_sep_px": ("" if rdk.min_sep_px is None else rdk.min_sep_px),
-        }
+    @app.post("/api/diagnostics.zip")
+    def api_diagnostics_zip() -> Response:
+        """Publication-quality figure bundle for the current parameters.
 
-        job_id = uuid.uuid4().hex
-        mp4_path = output_dir / f"{job_id}.mp4"
-        zip_path = output_dir / f"{job_id}.zip"
+        Streamed straight back rather than written to `outputs/`: this is a download, not
+        an export artifact, and it should not accumulate on disk.
+        """
+        rdk, render, _ = parse_form(request.form)
+        render = resolve_seed(render)
+        diag = compute_diagnostics(rdk, render)
+        blob = figures_zip(diag, rdk=rdk, render=render)
+        return _download(blob, "application/zip", f"rdk-diagnostics-{rdk.method}.zip")
 
-        write_mp4(mp4_path, rdk=rdk, render=render)
-        write_frames_zip(zip_path, rdk=rdk, render=render)
+    def _export_params() -> tuple[RDKParams, RenderParams]:
+        """Parse the form and pin the seed, so a download is reproducible from its own
+        params.json and every artifact in it describes one stimulus."""
+        rdk, render, sticky = parse_form(request.form)
+        _remember(rdk, sticky)
+        return rdk, resolve_seed(render)
 
-        session["last_job_id"] = job_id
-        session["has_preview"] = True
+    @app.post("/export/video.mp4")
+    def export_video() -> Response:
+        rdk, render = _export_params()
+        return _download(video_bytes(rdk, render), "video/mp4", f"rdk-{rdk.method}.mp4")
 
-        return redirect(url_for("index"))
+    @app.post("/export/frames.zip")
+    def export_frames() -> Response:
+        rdk, render = _export_params()
+        return _download(
+            frames_zip_bytes(rdk, render), "application/zip", f"rdk-frames-{rdk.method}.zip"
+        )
 
-    @app.get("/download/<job_id>.mp4")
-    def download_mp4(job_id: str):
-        path = output_dir / f"{job_id}.mp4"
-        return send_file(path, as_attachment=True, download_name=f"rdk_{job_id}.mp4")
+    @app.post("/export/params.json")
+    def export_params() -> Response:
+        rdk, render = _export_params()
+        return _download(
+            params_json(rdk, render).encode("utf-8"),
+            "application/json",
+            f"rdk-params-{rdk.method}.json",
+        )
 
-    @app.get("/download/<job_id>.zip")
-    def download_frames(job_id: str):
-        path = output_dir / f"{job_id}.zip"
-        return send_file(path, as_attachment=True, download_name=f"rdk_frames_{job_id}.zip")
+    @app.post("/export/bundle.zip")
+    def export_bundle() -> Response:
+        """Everything about one stimulus: video, frames, parameters and diagnostics.
 
-    @app.get("/meta/<job_id>")
-    def meta(job_id: str):
-        path = output_dir / f"{job_id}.json"
-        return send_file(path, as_attachment=False)
+        `everything_zip` pins the seed before generating anything, so the diagnostic plots
+        measure exactly the clip they ship beside rather than a different draw.
+        """
+        rdk, render = _export_params()
+        return _download(
+            everything_zip(rdk, render), "application/zip", f"rdk-bundle-{rdk.method}.zip"
+        )
 
     return app
 

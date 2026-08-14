@@ -41,6 +41,34 @@ def resolve_dot_luminances(
     return (lo, hi)
 
 
+def uniform_dot_luminance(
+    *,
+    background_lum: float,
+    dot_contrast: float | None,
+    dot_high_lum: float | None = None,
+) -> float:
+    """Resolve the single luminance used when every dot is drawn the same shade.
+
+    This is the classic arrangement: bright dots on a darker background. `dot_contrast`
+    is an absolute luminance span, so the dot sits `dot_contrast / 2` above the
+    background (clipped to the displayable range). To get white dots on black, pair
+    `background_lum=0.0` with `dot_contrast=2.0`.
+
+    An explicit `dot_high_lum` overrides the contrast-derived value.
+    """
+    if dot_high_lum is not None:
+        return clip01(dot_high_lum)
+    if dot_contrast is None:
+        raise ValueError("Provide either dot_contrast or dot_high_lum")
+
+    bg = clip01(background_lum)
+    lum = clip01(bg + float(dot_contrast) / 2.0)
+    if lum == bg:
+        # Zero span (or clipping collapsed it): fall back to maximum visibility.
+        lum = 1.0 if bg < 0.5 else 0.0
+    return lum
+
+
 def white_fraction_for_mean(background_lum: float, low_lum: float, high_lum: float) -> float:
     """Fraction of high-luminance dots needed so mean equals background.
 

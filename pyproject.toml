@@ -16,11 +16,18 @@ dependencies = [
   "imageio>=2.34",
   "imageio-ffmpeg>=0.5",
   "flask>=3.0",
+  "matplotlib>=3.8",
 ]
 
 [project.optional-dependencies]
 psychopy = ["psychopy"]
 dev = ["pytest>=8", "pytest-cov>=5", "ruff>=0.6"]
+
+# Vercel loads this WSGI app and routes every request to it. Without an entrypoint
+# it would only serve the paths it can infer, and dependencies come from
+# [project.dependencies] above, so there is no second list to keep in step.
+[tool.vercel]
+entrypoint = "rdk_generator.webapp.app:app"
 
 [tool.setuptools.packages.find]
 where = ["."]
