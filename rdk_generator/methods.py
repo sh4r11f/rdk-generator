@@ -257,8 +257,8 @@ _FIELD_LIST: tuple[ParamField, ...] = (
         min=0.0,
         max=2.0,
         step=0.01,
-        help="Absolute luminance span, not Michelson contrast: dots sit at background "
-        "+/- half this. For white dots on black use background 0 with contrast 2.",
+        help="Absolute span, not Michelson: dots sit at background +/- half this. "
+        "White on black = background 0, contrast 2.",
     ),
     ParamField(
         name="luminance_mode",
