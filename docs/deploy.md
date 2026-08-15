@@ -30,14 +30,26 @@ remember form values — that is a signed cookie, so it survives moving between 
 
 ## Vercel
 
+The GitHub repository is connected to the Vercel project, so deployment is automatic:
+pushing to `main` deploys production, and every pull request gets its own preview URL.
+Nothing needs running by hand.
+
+To deploy from a local checkout anyway — useful for trying something without committing:
+
 ```bash
-vercel login      # interactive; only you can do this
 vercel            # preview deployment
 vercel --prod     # production
 ```
 
-`requirements.txt` mirrors `[project.dependencies]` in `pyproject.toml` and must be kept in
-step with it. `.vercelignore` keeps the virtualenv, tests and docs out of the bundle.
+Note that a CLI deploy uploads your working directory, so it is a snapshot rather than a
+commit: it can put uncommitted or unreviewed code on the production domain. Prefer letting
+git drive it.
+
+Dependencies come from `[project.dependencies]` in `pyproject.toml`; Vercel's Flask preset
+installs from it directly, so there is no second list to keep in step. `tool.vercel.entrypoint`
+points at the WSGI app, which is what makes Vercel route every request to Flask rather than
+serving only the paths it can infer. `.vercelignore` keeps the virtualenv, tests and docs out
+of the bundle.
 
 ### Known limits on serverless
 
