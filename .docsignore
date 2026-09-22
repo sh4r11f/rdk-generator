@@ -1,0 +1,8 @@
+# Not documentation for a person — keep out of the docs book.
+# One glob per line; read by the documentation book builder.
+#
+# CLAUDE.md, AGENT.md and the skills are instructions to a coding agent working
+# in this repository, not documentation of the stimulus generator.
+CLAUDE.md
+AGENT.md
+.claude/**
