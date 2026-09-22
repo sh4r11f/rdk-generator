@@ -6,6 +6,14 @@ actually did, and a web UI that previews it live.
 
 **Live: [rdk-generator.vercel.app](https://rdk-generator.vercel.app)**
 
+**Where it stands, Sep 2026: finished and in use.** This is a tool, not an
+experiment — there is no result pending and nothing half-built. All eight
+methods, the diagnostics and the exports are implemented and tested, the web UI
+is deployed at the link above, and one experiment in the lab
+([mbri](https://github.com/sh4r11f/mbri)) depends on it as a library rather
+than carrying its own dot engine. The last change was Aug 2026. Work on it
+happens when an experiment needs something it does not yet do.
+
 ## What's here
 
 **Eight methods.** The four canonical algorithms — Movshon–Newsome, Brownian (random walk),
