@@ -214,3 +214,6 @@ __marimo__/
 node_modules/
 package.json
 package-lock.json
+
+# Built documentation book (build output, rebuilt by the docs builder).
+docs/*-docs.pdf
